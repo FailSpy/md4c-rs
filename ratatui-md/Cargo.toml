@@ -2,6 +2,7 @@
 name = "ratatui-md"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.70"
 authors = ["failspy"]
 description = "Markdown rendering for ratatui terminal UIs using MD4C"
 license = "MIT"

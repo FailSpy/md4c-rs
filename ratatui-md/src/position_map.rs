@@ -108,7 +108,7 @@ impl LinePosMap {
     #[inline]
     pub fn push(&mut self, mapping: CharMapping) {
         debug_assert!(
-            self.chars.last().is_none_or(|last| last.render_offset < mapping.render_offset),
+            self.chars.last().map_or(true, |last| last.render_offset < mapping.render_offset),
             "CharMappings must be pushed in ascending render_offset order"
         );
         self.chars.push(mapping);

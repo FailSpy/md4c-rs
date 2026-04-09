@@ -86,10 +86,10 @@ pub struct Theme {
     /// Ordered list number marker style
     pub list_number: Style,
 
-    /// Task list unchecked marker [ ] style
+    /// Task list unchecked marker \[ \] style
     pub task_unchecked: Style,
 
-    /// Task list checked marker [x] style
+    /// Task list checked marker \[x\] style
     pub task_checked: Style,
 
     /// Table header cell style

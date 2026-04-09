@@ -222,20 +222,20 @@ impl MarkdownView {
     }
 
     /// Get all headings in the document.
-    pub fn headings(&mut self) -> Vec<HeadingInfo> {
+    pub fn headings(&mut self) -> &[HeadingInfo] {
         self.ensure_rendered();
         self.rendered
             .as_ref()
-            .map(|r| r.headings.clone())
+            .map(|r| r.headings.as_slice())
             .unwrap_or_default()
     }
 
     /// Get all links in the document.
-    pub fn links(&mut self) -> Vec<LinkInfo> {
+    pub fn links(&mut self) -> &[LinkInfo] {
         self.ensure_rendered();
         self.rendered
             .as_ref()
-            .map(|r| r.links.clone())
+            .map(|r| r.links.as_slice())
             .unwrap_or_default()
     }
 
@@ -319,12 +319,12 @@ pub struct MarkdownViewWidget<'a> {
 
 impl Widget for MarkdownViewWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let text = self.view.rendered.as_ref().map(|r| r.text.clone()).unwrap_or_default();
-
-        Paragraph::new(text)
-            .wrap(Wrap { trim: false })
-            .scroll((self.view.scroll_offset, 0))
-            .render(area, buf);
+        if let Some(ref rendered) = self.view.rendered {
+            Paragraph::new(rendered.text.clone())
+                .wrap(Wrap { trim: false })
+                .scroll((self.view.scroll_offset, 0))
+                .render(area, buf);
+        }
     }
 }
 

@@ -5,7 +5,6 @@
 use crate::highlight::SyntaxHighlighter;
 use crate::position_map::{CharMapping, FormatMark, PositionMap};
 use crate::theme::Theme;
-use smallvec::SmallVec;
 use md4c::{
     parse, Alignment, Block, BlockType, CodeBlockDetail, HeadingDetail, ImageDetail, LinkDetail,
     ListItemDetail, OrderedListDetail, ParserFlags, ParserHandler, Span, SpanType, TableCellDetail,
@@ -13,12 +12,15 @@ use md4c::{
 };
 use ratatui::style::Style;
 use ratatui::text::{Line, Span as RSpan, Text};
+use unicode_width::UnicodeWidthStr;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
 // Thread-local cache for syntax-highlighted code blocks.
 // Key is hash of (content, language), value is the highlighted lines.
+// Capped at 64 entries to prevent unbounded growth in long-running apps.
+const HIGHLIGHT_CACHE_CAP: usize = 64;
 thread_local! {
     static HIGHLIGHT_CACHE: RefCell<HashMap<u64, Vec<Line<'static>>>> = RefCell::new(HashMap::new());
 }
@@ -247,7 +249,7 @@ struct RendererState<'a> {
     highlighter: Option<SyntaxHighlighter>,
 
     // Position tracking for selection support
-    formatting_stack: SmallVec<[FormatMark; 4]>,
+    formatting_stack: Vec<FormatMark>,
     position_map: PositionMap,
     current_render_col: usize,
 }
@@ -294,7 +296,7 @@ impl<'a> RendererState<'a> {
             latex_math_buffer: String::new(),
             highlighter,
             // Position tracking
-            formatting_stack: SmallVec::new(),
+            formatting_stack: Vec::new(),
             position_map: PositionMap::new(),
             current_render_col: 0,
         }
@@ -445,7 +447,7 @@ impl<'a> RendererState<'a> {
     /// Wrap spans to fit within the configured width.
     fn wrap_spans(&self, spans: Vec<RSpan<'static>>, prefix: Option<RSpan<'static>>) -> Vec<Line<'static>> {
         let max_width = self.options.width;
-        let prefix_len = prefix.as_ref().map(|p| p.content.len()).unwrap_or(0);
+        let prefix_len = prefix.as_ref().map(|p| p.content.width()).unwrap_or(0);
         let effective_width = max_width.saturating_sub(prefix_len);
 
         if effective_width == 0 {
@@ -497,7 +499,7 @@ impl<'a> RendererState<'a> {
                 remaining = &remaining[word_end..];
 
                 // Check if word fits on current line
-                if current_width + word.len() > effective_width && current_width > 0 {
+                if current_width + word.width() > effective_width && current_width > 0 {
                     // Start new line
                     let mut line_spans = std::mem::take(&mut current_line);
                     if let Some(ref p) = prefix {
@@ -510,7 +512,7 @@ impl<'a> RendererState<'a> {
                 // Add word (possibly to new line)
                 if !word.is_empty() {
                     current_line.push(RSpan::styled(word.to_string(), style));
-                    current_width += word.len();
+                    current_width += word.width();
                 }
             }
         }
@@ -578,7 +580,7 @@ impl<'a> RendererState<'a> {
         for row in &self.table_rows {
             for (i, cell) in row.iter().enumerate() {
                 if i < col_widths.len() {
-                    let cell_width: usize = cell.iter().map(|s| s.content.len()).sum();
+                    let cell_width: usize = cell.iter().map(|s| s.content.width()).sum();
                     col_widths[i] = col_widths[i].max(cell_width);
                 }
             }
@@ -609,10 +611,16 @@ impl<'a> RendererState<'a> {
                 let width = col_widths.get(col_idx).copied().unwrap_or(3);
                 let align = self.table_alignments.get(col_idx).copied().unwrap_or(Alignment::Default);
 
+                let text_width = cell_text.width();
+                let pad = width.saturating_sub(text_width);
                 let padded = match align {
-                    Alignment::Center => format!("{:^width$}", cell_text, width = width),
-                    Alignment::Right => format!("{:>width$}", cell_text, width = width),
-                    _ => format!("{:<width$}", cell_text, width = width),
+                    Alignment::Center => {
+                        let left = pad / 2;
+                        let right = pad - left;
+                        format!("{}{}{}", " ".repeat(left), cell_text, " ".repeat(right))
+                    }
+                    Alignment::Right => format!("{}{}", " ".repeat(pad), cell_text),
+                    _ => format!("{}{}", cell_text, " ".repeat(pad)),
                 };
 
                 let style = if row_idx == 0 {
@@ -848,6 +856,9 @@ impl ParserHandler for RendererState<'_> {
                             }
                             // Cache miss - highlight and store
                             let lines = highlighter.highlight(&self.code_block_content, &self.code_block_lang);
+                            if cache.len() >= HIGHLIGHT_CACHE_CAP {
+                                cache.clear();
+                            }
                             cache.insert(hash, lines.clone());
                             lines
                         });
@@ -1266,12 +1277,6 @@ mod tests {
             .iter()
             .map(|line| line.spans.iter().map(|s| s.content.to_string()).collect())
             .collect();
-        
-        // Print for debugging
-        eprintln!("Rendered table:");
-        for (i, line) in rendered_text.iter().enumerate() {
-            eprintln!("{}: {}", i, line);
-        }
         
         // Should have: top border + header + header separator + row1 + row separator + row2 + bottom border = 7 lines
         assert!(rendered_text.len() >= 7, "Table should have at least 7 lines (top, header, h-sep, row1, row-sep, row2, bottom), got {}", rendered_text.len());

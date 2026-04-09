@@ -119,7 +119,7 @@ pub mod widget;
 // Re-export main types
 pub use highlight::SyntaxHighlighter;
 pub use latex::latex_to_unicode;
-pub use position_map::{CharMapping, FormatMark, LinePosMap, PositionMap};
+pub use position_map::{CharMapping, FormatMark, PositionMap};
 pub use renderer::{render, render_default, HeadingInfo, LinkInfo, RenderOptions, RenderedMarkdown};
 pub use theme::Theme;
 pub use widget::{Markdown, MarkdownSpan, MarkdownView, MarkdownViewWidget};
@@ -318,12 +318,6 @@ mod tests {
         let theme = Theme::dark();
         let options = RenderOptions::github().with_width(80);
         let result = render(md, &theme, &options);
-
-        // Print for debugging
-        for (i, line) in result.text.lines.iter().enumerate() {
-            let text: String = line.spans.iter().map(|s| s.content.to_string()).collect();
-            eprintln!("{:3}: {:?}", i, text);
-        }
 
         // Each tree line should be on a separate Line
         let line_count = result.text.lines.len();

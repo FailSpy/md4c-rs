@@ -3,8 +3,6 @@
 //! Maps rendered character positions back to source context,
 //! enabling text selection and extraction with formatting awareness.
 
-use smallvec::SmallVec;
-
 /// Formatting mark indicating active inline formatting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FormatMark {
@@ -59,28 +57,28 @@ pub struct CharMapping {
     pub render_offset: usize,
     /// Active formatting at this character position.
     /// Stack order: outermost to innermost (e.g., [Bold, Italic] for `**_text_**`).
-    pub formatting_stack: SmallVec<[FormatMark; 4]>,
+    pub formatting: Vec<FormatMark>,
 }
 
 impl CharMapping {
     /// Create a new character mapping.
-    pub fn new(render_offset: usize, formatting_stack: SmallVec<[FormatMark; 4]>) -> Self {
+    pub fn new(render_offset: usize, formatting: Vec<FormatMark>) -> Self {
         Self {
             render_offset,
-            formatting_stack,
+            formatting,
         }
     }
 
     /// Returns the nesting depth of formatting.
     #[inline]
     pub fn formatting_depth(&self) -> usize {
-        self.formatting_stack.len()
+        self.formatting.len()
     }
 
     /// Check if this position has a specific format active.
     #[inline]
     pub fn has_format(&self, mark: FormatMark) -> bool {
-        self.formatting_stack.contains(&mark)
+        self.formatting.contains(&mark)
     }
 }
 
@@ -130,8 +128,8 @@ impl LinePosMap {
     }
 
     /// Get the formatting stack at a given render offset.
-    pub fn formatting_at(&self, render_offset: usize) -> Option<&SmallVec<[FormatMark; 4]>> {
-        self.mapping_at(render_offset).map(|m| &m.formatting_stack)
+    pub fn formatting_at(&self, render_offset: usize) -> Option<&[FormatMark]> {
+        self.mapping_at(render_offset).map(|m| m.formatting.as_slice())
     }
 
     /// Number of mapped characters.
@@ -201,7 +199,7 @@ impl PositionMap {
     }
 
     /// Get the formatting at a specific (line, char) position.
-    pub fn formatting_at(&self, line_idx: usize, render_offset: usize) -> Option<&SmallVec<[FormatMark; 4]>> {
+    pub fn formatting_at(&self, line_idx: usize, render_offset: usize) -> Option<&[FormatMark]> {
         self.line(line_idx)?.formatting_at(render_offset)
     }
 
@@ -237,7 +235,7 @@ mod tests {
 
     #[test]
     fn test_char_mapping() {
-        let stack: SmallVec<[FormatMark; 4]> = smallvec::smallvec![FormatMark::Bold, FormatMark::Italic];
+        let stack = vec![FormatMark::Bold, FormatMark::Italic];
         let mapping = CharMapping::new(5, stack);
 
         assert_eq!(mapping.render_offset, 5);
@@ -252,9 +250,9 @@ mod tests {
         let mut line = LinePosMap::new();
 
         // Add mappings at positions 0, 5, 10
-        line.push(CharMapping::new(0, smallvec::smallvec![]));
-        line.push(CharMapping::new(5, smallvec::smallvec![FormatMark::Bold]));
-        line.push(CharMapping::new(10, smallvec::smallvec![FormatMark::Bold, FormatMark::Italic]));
+        line.push(CharMapping::new(0, vec![]));
+        line.push(CharMapping::new(5, vec![FormatMark::Bold]));
+        line.push(CharMapping::new(10, vec![FormatMark::Bold, FormatMark::Italic]));
 
         // Exact matches
         assert_eq!(line.mapping_at(0).unwrap().render_offset, 0);
@@ -273,12 +271,12 @@ mod tests {
 
         // Build line 0
         map.start_line();
-        map.current_line_mut().unwrap().push(CharMapping::new(0, smallvec::smallvec![]));
-        map.current_line_mut().unwrap().push(CharMapping::new(5, smallvec::smallvec![FormatMark::Bold]));
+        map.current_line_mut().unwrap().push(CharMapping::new(0, vec![]));
+        map.current_line_mut().unwrap().push(CharMapping::new(5, vec![FormatMark::Bold]));
 
         // Build line 1
         map.start_line();
-        map.current_line_mut().unwrap().push(CharMapping::new(0, smallvec::smallvec![FormatMark::Italic]));
+        map.current_line_mut().unwrap().push(CharMapping::new(0, vec![FormatMark::Italic]));
 
         assert_eq!(map.line_count(), 2);
         assert_eq!(map.line(0).unwrap().len(), 2);

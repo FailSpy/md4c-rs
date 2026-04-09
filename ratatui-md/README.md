@@ -17,10 +17,10 @@ Uses [MD4C](https://github.com/mity/md4c) for fast, CommonMark-compliant parsing
 
 ```toml
 [dependencies]
-ratatui-md = { path = "path/to/ratatui-md" }
+ratatui-md = "0.1"
 
 # Optional: syntax highlighting
-ratatui-md = { path = "path/to/ratatui-md", features = ["syntect"] }
+ratatui-md = { version = "0.1", features = ["syntect"] }
 ```
 
 ## Quick Start

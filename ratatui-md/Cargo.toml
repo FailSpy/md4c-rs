@@ -16,7 +16,6 @@ md4c-rs = { workspace = true }
 ratatui = { workspace = true }
 unicode-width = { workspace = true }
 unicode-segmentation = { workspace = true }
-smallvec = { workspace = true }
 
 # Optional: syntax highlighting for code blocks
 syntect = { workspace = true, optional = true }

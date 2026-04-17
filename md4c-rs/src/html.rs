@@ -211,8 +211,12 @@ mod tests {
 
     #[test]
     fn test_basic_html_rendering() {
-        let html = render_html("Hello **world**", ParserFlags::commonmark(), HtmlFlags::new())
-            .unwrap();
+        let html = render_html(
+            "Hello **world**",
+            ParserFlags::commonmark(),
+            HtmlFlags::new(),
+        )
+        .unwrap();
         assert!(html.contains("<strong>world</strong>"));
     }
 
@@ -224,19 +228,19 @@ mod tests {
 
     #[test]
     fn test_github_flavor() {
-        let html = render_html(
-            "~~strikethrough~~",
-            ParserFlags::github(),
-            HtmlFlags::new(),
-        )
-        .unwrap();
+        let html =
+            render_html("~~strikethrough~~", ParserFlags::github(), HtmlFlags::new()).unwrap();
         assert!(html.contains("<del>strikethrough</del>"));
     }
 
     #[test]
     fn test_xhtml_output() {
-        let html = render_html("line1  \nline2", ParserFlags::commonmark(), HtmlFlags::new().xhtml())
-            .unwrap();
+        let html = render_html(
+            "line1  \nline2",
+            ParserFlags::commonmark(),
+            HtmlFlags::new().xhtml(),
+        )
+        .unwrap();
         assert!(html.contains("<br />"));
     }
 }

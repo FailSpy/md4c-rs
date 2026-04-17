@@ -18,12 +18,16 @@ impl ParserFlags {
 
     /// CommonMark dialect (no extensions)
     pub const fn commonmark() -> Self {
-        ParserFlags { flags: sys::MD_DIALECT_COMMONMARK }
+        ParserFlags {
+            flags: sys::MD_DIALECT_COMMONMARK,
+        }
     }
 
     /// GitHub-flavored Markdown dialect
     pub const fn github() -> Self {
-        ParserFlags { flags: sys::MD_DIALECT_GITHUB }
+        ParserFlags {
+            flags: sys::MD_DIALECT_GITHUB,
+        }
     }
 
     /// Collapse non-trivial whitespace
@@ -208,7 +212,11 @@ pub trait ParserHandler {
 }
 
 /// Parse markdown text with a custom handler
-pub fn parse<H: ParserHandler>(input: &str, flags: ParserFlags, handler: &mut H) -> ParseResult<()> {
+pub fn parse<H: ParserHandler>(
+    input: &str,
+    flags: ParserFlags,
+    handler: &mut H,
+) -> ParseResult<()> {
     struct Context<'a, H: ParserHandler> {
         handler: &'a mut H,
         error: Option<i32>,
@@ -359,8 +367,7 @@ pub fn parse_to_events(input: &str, flags: ParserFlags) -> ParseResult<Vec<Event
         }
 
         fn text(&mut self, text_type: TextType, text: &str) -> bool {
-            self.events
-                .push(Event::Text(text_type, text.to_owned()));
+            self.events.push(Event::Text(text_type, text.to_owned()));
             true
         }
     }

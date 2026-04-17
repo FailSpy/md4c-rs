@@ -106,7 +106,9 @@ impl LinePosMap {
     #[inline]
     pub fn push(&mut self, mapping: CharMapping) {
         debug_assert!(
-            self.chars.last().map_or(true, |last| last.render_offset < mapping.render_offset),
+            self.chars
+                .last()
+                .map_or(true, |last| last.render_offset < mapping.render_offset),
             "CharMappings must be pushed in ascending render_offset order"
         );
         self.chars.push(mapping);
@@ -120,7 +122,10 @@ impl LinePosMap {
             return None;
         }
 
-        match self.chars.binary_search_by_key(&render_offset, |c| c.render_offset) {
+        match self
+            .chars
+            .binary_search_by_key(&render_offset, |c| c.render_offset)
+        {
             Ok(i) => Some(&self.chars[i]),
             Err(i) if i > 0 => Some(&self.chars[i - 1]),
             Err(_) => None,
@@ -129,7 +134,8 @@ impl LinePosMap {
 
     /// Get the formatting stack at a given render offset.
     pub fn formatting_at(&self, render_offset: usize) -> Option<&[FormatMark]> {
-        self.mapping_at(render_offset).map(|m| m.formatting.as_slice())
+        self.mapping_at(render_offset)
+            .map(|m| m.formatting.as_slice())
     }
 
     /// Number of mapped characters.
@@ -252,7 +258,10 @@ mod tests {
         // Add mappings at positions 0, 5, 10
         line.push(CharMapping::new(0, vec![]));
         line.push(CharMapping::new(5, vec![FormatMark::Bold]));
-        line.push(CharMapping::new(10, vec![FormatMark::Bold, FormatMark::Italic]));
+        line.push(CharMapping::new(
+            10,
+            vec![FormatMark::Bold, FormatMark::Italic],
+        ));
 
         // Exact matches
         assert_eq!(line.mapping_at(0).unwrap().render_offset, 0);
@@ -271,12 +280,18 @@ mod tests {
 
         // Build line 0
         map.start_line();
-        map.current_line_mut().unwrap().push(CharMapping::new(0, vec![]));
-        map.current_line_mut().unwrap().push(CharMapping::new(5, vec![FormatMark::Bold]));
+        map.current_line_mut()
+            .unwrap()
+            .push(CharMapping::new(0, vec![]));
+        map.current_line_mut()
+            .unwrap()
+            .push(CharMapping::new(5, vec![FormatMark::Bold]));
 
         // Build line 1
         map.start_line();
-        map.current_line_mut().unwrap().push(CharMapping::new(0, vec![FormatMark::Italic]));
+        map.current_line_mut()
+            .unwrap()
+            .push(CharMapping::new(0, vec![FormatMark::Italic]));
 
         assert_eq!(map.line_count(), 2);
         assert_eq!(map.line(0).unwrap().len(), 2);

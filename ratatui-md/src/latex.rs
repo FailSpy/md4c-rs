@@ -39,16 +39,45 @@ fn convert(input: &str) -> String {
                 }
                 // Single-char escapes
                 match bytes[i] {
-                    b'\\' => { out.push('\\'); i += 1; }
-                    b'{' => { out.push('{'); i += 1; }
-                    b'}' => { out.push('}'); i += 1; }
-                    b',' => { out.push('\u{2009}'); i += 1; } // thin space
-                    b';' => { out.push(' '); i += 1; }
-                    b':' => { out.push('\u{2005}'); i += 1; } // medium math space
-                    b'!' => { i += 1; } // negative thin space → nothing
-                    b' ' => { out.push(' '); i += 1; }
-                    b'|' => { out.push('‖'); i += 1; }
-                    b'%' => { out.push('%'); i += 1; }
+                    b'\\' => {
+                        out.push('\\');
+                        i += 1;
+                    }
+                    b'{' => {
+                        out.push('{');
+                        i += 1;
+                    }
+                    b'}' => {
+                        out.push('}');
+                        i += 1;
+                    }
+                    b',' => {
+                        out.push('\u{2009}');
+                        i += 1;
+                    } // thin space
+                    b';' => {
+                        out.push(' ');
+                        i += 1;
+                    }
+                    b':' => {
+                        out.push('\u{2005}');
+                        i += 1;
+                    } // medium math space
+                    b'!' => {
+                        i += 1;
+                    } // negative thin space → nothing
+                    b' ' => {
+                        out.push(' ');
+                        i += 1;
+                    }
+                    b'|' => {
+                        out.push('‖');
+                        i += 1;
+                    }
+                    b'%' => {
+                        out.push('%');
+                        i += 1;
+                    }
                     _ if bytes[i].is_ascii_alphabetic() => {
                         let cmd_start = i;
                         while i < len && bytes[i].is_ascii_alphabetic() {
@@ -140,8 +169,8 @@ fn handle_command(cmd: &str, bytes: &[u8], mut pos: usize, out: &mut String) -> 
             }
             return pos;
         }
-        "text" | "mathrm" | "textrm" | "textit" | "textbf" | "textsf" | "texttt"
-        | "mathit" | "mathsf" | "mathtt" | "operatorname" => {
+        "text" | "mathrm" | "textrm" | "textit" | "textbf" | "textsf" | "texttt" | "mathit"
+        | "mathsf" | "mathtt" | "operatorname" => {
             if let Some((content, after)) = extract_braced(bytes, pos) {
                 out.push_str(content);
                 return after;
@@ -200,8 +229,8 @@ fn handle_command(cmd: &str, bytes: &[u8], mut pos: usize, out: &mut String) -> 
         "acute" => return accent_command(bytes, pos, out, '\u{0301}', cmd),
         "grave" => return accent_command(bytes, pos, out, '\u{0300}', cmd),
         // Sizing/delimiter commands — strip and emit delimiter
-        "left" | "right" | "big" | "Big" | "bigg" | "Bigg"
-        | "bigl" | "bigr" | "Bigl" | "Bigr" | "biggl" | "biggr" | "Biggl" | "Biggr" => {
+        "left" | "right" | "big" | "Big" | "bigg" | "Bigg" | "bigl" | "bigr" | "Bigl" | "Bigr"
+        | "biggl" | "biggr" | "Biggl" | "Biggr" => {
             // Next char is the delimiter
             if pos < bytes.len() {
                 let delim = match bytes[pos] {
@@ -210,7 +239,10 @@ fn handle_command(cmd: &str, bytes: &[u8], mut pos: usize, out: &mut String) -> 
                     b'[' => '[',
                     b']' => ']',
                     b'|' => '|',
-                    b'.' => { pos += 1; return pos; } // \left. = invisible delimiter
+                    b'.' => {
+                        pos += 1;
+                        return pos;
+                    } // \left. = invisible delimiter
                     b'\\' => {
                         // e.g. \left\{ or \left\langle
                         pos += 1;
@@ -239,7 +271,9 @@ fn handle_command(cmd: &str, bytes: &[u8], mut pos: usize, out: &mut String) -> 
                         }
                         return pos;
                     }
-                    _ => { return pos; }
+                    _ => {
+                        return pos;
+                    }
                 };
                 out.push(delim);
                 return pos + 1;
@@ -279,7 +313,10 @@ fn accent_command(bytes: &[u8], pos: usize, out: &mut String, combining: char, c
     }
     // No braces — apply to next single char
     if pos < bytes.len() && bytes[pos] != b'\\' && bytes[pos] != b'{' {
-        if let Some(c) = std::str::from_utf8(&bytes[pos..]).ok().and_then(|s| s.chars().next()) {
+        if let Some(c) = std::str::from_utf8(&bytes[pos..])
+            .ok()
+            .and_then(|s| s.chars().next())
+        {
             out.push(c);
             out.push(combining);
             return pos + c.len_utf8();
@@ -394,7 +431,9 @@ fn extract_braced(bytes: &[u8], pos: usize) -> Option<(&str, usize)> {
         match bytes[i] {
             b'{' => depth += 1,
             b'}' => depth -= 1,
-            b'\\' => { i += 1; } // skip escaped char
+            b'\\' => {
+                i += 1;
+            } // skip escaped char
             _ => {}
         }
         if depth > 0 {
@@ -420,7 +459,9 @@ fn extract_bracketed(bytes: &[u8], pos: usize) -> Option<(&str, usize)> {
         match bytes[i] {
             b'[' => depth += 1,
             b']' => depth -= 1,
-            b'\\' => { i += 1; }
+            b'\\' => {
+                i += 1;
+            }
             _ => {}
         }
         if depth > 0 {
@@ -437,19 +478,65 @@ fn extract_bracketed(bytes: &[u8], pos: usize) -> Option<(&str, usize)> {
 
 fn to_superscript(c: char) -> Option<char> {
     Some(match c {
-        '0' => '⁰', '1' => '¹', '2' => '²', '3' => '³', '4' => '⁴',
-        '5' => '⁵', '6' => '⁶', '7' => '⁷', '8' => '⁸', '9' => '⁹',
-        '+' => '⁺', '-' | '−' => '⁻', '=' => '⁼',
-        '(' => '⁽', ')' => '⁾',
-        'a' => 'ᵃ', 'b' => 'ᵇ', 'c' => 'ᶜ', 'd' => 'ᵈ', 'e' => 'ᵉ',
-        'f' => 'ᶠ', 'g' => 'ᵍ', 'h' => 'ʰ', 'i' => 'ⁱ', 'j' => 'ʲ',
-        'k' => 'ᵏ', 'l' => 'ˡ', 'm' => 'ᵐ', 'n' => 'ⁿ', 'o' => 'ᵒ',
-        'p' => 'ᵖ', 'r' => 'ʳ', 's' => 'ˢ', 't' => 'ᵗ', 'u' => 'ᵘ',
-        'v' => 'ᵛ', 'w' => 'ʷ', 'x' => 'ˣ', 'y' => 'ʸ', 'z' => 'ᶻ',
-        'A' => 'ᴬ', 'B' => 'ᴮ', 'D' => 'ᴰ', 'E' => 'ᴱ', 'G' => 'ᴳ',
-        'H' => 'ᴴ', 'I' => 'ᴵ', 'J' => 'ᴶ', 'K' => 'ᴷ', 'L' => 'ᴸ',
-        'M' => 'ᴹ', 'N' => 'ᴺ', 'O' => 'ᴼ', 'P' => 'ᴾ', 'R' => 'ᴿ',
-        'T' => 'ᵀ', 'U' => 'ᵁ', 'V' => 'ⱽ', 'W' => 'ᵂ',
+        '0' => '⁰',
+        '1' => '¹',
+        '2' => '²',
+        '3' => '³',
+        '4' => '⁴',
+        '5' => '⁵',
+        '6' => '⁶',
+        '7' => '⁷',
+        '8' => '⁸',
+        '9' => '⁹',
+        '+' => '⁺',
+        '-' | '−' => '⁻',
+        '=' => '⁼',
+        '(' => '⁽',
+        ')' => '⁾',
+        'a' => 'ᵃ',
+        'b' => 'ᵇ',
+        'c' => 'ᶜ',
+        'd' => 'ᵈ',
+        'e' => 'ᵉ',
+        'f' => 'ᶠ',
+        'g' => 'ᵍ',
+        'h' => 'ʰ',
+        'i' => 'ⁱ',
+        'j' => 'ʲ',
+        'k' => 'ᵏ',
+        'l' => 'ˡ',
+        'm' => 'ᵐ',
+        'n' => 'ⁿ',
+        'o' => 'ᵒ',
+        'p' => 'ᵖ',
+        'r' => 'ʳ',
+        's' => 'ˢ',
+        't' => 'ᵗ',
+        'u' => 'ᵘ',
+        'v' => 'ᵛ',
+        'w' => 'ʷ',
+        'x' => 'ˣ',
+        'y' => 'ʸ',
+        'z' => 'ᶻ',
+        'A' => 'ᴬ',
+        'B' => 'ᴮ',
+        'D' => 'ᴰ',
+        'E' => 'ᴱ',
+        'G' => 'ᴳ',
+        'H' => 'ᴴ',
+        'I' => 'ᴵ',
+        'J' => 'ᴶ',
+        'K' => 'ᴷ',
+        'L' => 'ᴸ',
+        'M' => 'ᴹ',
+        'N' => 'ᴺ',
+        'O' => 'ᴼ',
+        'P' => 'ᴾ',
+        'R' => 'ᴿ',
+        'T' => 'ᵀ',
+        'U' => 'ᵁ',
+        'V' => 'ⱽ',
+        'W' => 'ᵂ',
         '*' => '˟',
         ' ' => ' ',
         _ => return None,
@@ -458,14 +545,38 @@ fn to_superscript(c: char) -> Option<char> {
 
 fn to_subscript(c: char) -> Option<char> {
     Some(match c {
-        '0' => '₀', '1' => '₁', '2' => '₂', '3' => '₃', '4' => '₄',
-        '5' => '₅', '6' => '₆', '7' => '₇', '8' => '₈', '9' => '₉',
-        '+' => '₊', '-' | '−' => '₋', '=' => '₌',
-        '(' => '₍', ')' => '₎',
-        'a' => 'ₐ', 'e' => 'ₑ', 'h' => 'ₕ', 'i' => 'ᵢ', 'j' => 'ⱼ',
-        'k' => 'ₖ', 'l' => 'ₗ', 'm' => 'ₘ', 'n' => 'ₙ', 'o' => 'ₒ',
-        'p' => 'ₚ', 'r' => 'ᵣ', 's' => 'ₛ', 't' => 'ₜ', 'u' => 'ᵤ',
-        'v' => 'ᵥ', 'x' => 'ₓ',
+        '0' => '₀',
+        '1' => '₁',
+        '2' => '₂',
+        '3' => '₃',
+        '4' => '₄',
+        '5' => '₅',
+        '6' => '₆',
+        '7' => '₇',
+        '8' => '₈',
+        '9' => '₉',
+        '+' => '₊',
+        '-' | '−' => '₋',
+        '=' => '₌',
+        '(' => '₍',
+        ')' => '₎',
+        'a' => 'ₐ',
+        'e' => 'ₑ',
+        'h' => 'ₕ',
+        'i' => 'ᵢ',
+        'j' => 'ⱼ',
+        'k' => 'ₖ',
+        'l' => 'ₗ',
+        'm' => 'ₘ',
+        'n' => 'ₙ',
+        'o' => 'ₒ',
+        'p' => 'ₚ',
+        'r' => 'ᵣ',
+        's' => 'ₛ',
+        't' => 'ₜ',
+        'u' => 'ᵤ',
+        'v' => 'ᵥ',
+        'x' => 'ₓ',
         ' ' => ' ',
         _ => return None,
     })
@@ -473,25 +584,73 @@ fn to_subscript(c: char) -> Option<char> {
 
 fn blackboard_bold(c: char) -> char {
     match c {
-        'A' => '𝔸', 'B' => '𝔹', 'C' => 'ℂ', 'D' => '𝔻', 'E' => '𝔼',
-        'F' => '𝔽', 'G' => '𝔾', 'H' => 'ℍ', 'I' => '𝕀', 'J' => '𝕁',
-        'K' => '𝕂', 'L' => '𝕃', 'M' => '𝕄', 'N' => 'ℕ', 'O' => '𝕆',
-        'P' => 'ℙ', 'Q' => 'ℚ', 'R' => 'ℝ', 'S' => '𝕊', 'T' => '𝕋',
-        'U' => '𝕌', 'V' => '𝕍', 'W' => '𝕎', 'X' => '𝕏', 'Y' => '𝕐',
+        'A' => '𝔸',
+        'B' => '𝔹',
+        'C' => 'ℂ',
+        'D' => '𝔻',
+        'E' => '𝔼',
+        'F' => '𝔽',
+        'G' => '𝔾',
+        'H' => 'ℍ',
+        'I' => '𝕀',
+        'J' => '𝕁',
+        'K' => '𝕂',
+        'L' => '𝕃',
+        'M' => '𝕄',
+        'N' => 'ℕ',
+        'O' => '𝕆',
+        'P' => 'ℙ',
+        'Q' => 'ℚ',
+        'R' => 'ℝ',
+        'S' => '𝕊',
+        'T' => '𝕋',
+        'U' => '𝕌',
+        'V' => '𝕍',
+        'W' => '𝕎',
+        'X' => '𝕏',
+        'Y' => '𝕐',
         'Z' => 'ℤ',
-        '0' => '𝟘', '1' => '𝟙', '2' => '𝟚', '3' => '𝟛', '4' => '𝟜',
-        '5' => '𝟝', '6' => '𝟞', '7' => '𝟟', '8' => '𝟠', '9' => '𝟡',
+        '0' => '𝟘',
+        '1' => '𝟙',
+        '2' => '𝟚',
+        '3' => '𝟛',
+        '4' => '𝟜',
+        '5' => '𝟝',
+        '6' => '𝟞',
+        '7' => '𝟟',
+        '8' => '𝟠',
+        '9' => '𝟡',
         _ => c,
     }
 }
 
 fn math_calligraphic(c: char) -> char {
     match c {
-        'A' => '𝒜', 'B' => 'ℬ', 'C' => '𝒞', 'D' => '𝒟', 'E' => 'ℰ',
-        'F' => 'ℱ', 'G' => '𝒢', 'H' => 'ℋ', 'I' => 'ℐ', 'J' => '𝒥',
-        'K' => '𝒦', 'L' => 'ℒ', 'M' => 'ℳ', 'N' => '𝒩', 'O' => '𝒪',
-        'P' => '𝒫', 'Q' => '𝒬', 'R' => 'ℛ', 'S' => '𝒮', 'T' => '𝒯',
-        'U' => '𝒰', 'V' => '𝒱', 'W' => '𝒲', 'X' => '𝒳', 'Y' => '𝒴',
+        'A' => '𝒜',
+        'B' => 'ℬ',
+        'C' => '𝒞',
+        'D' => '𝒟',
+        'E' => 'ℰ',
+        'F' => 'ℱ',
+        'G' => '𝒢',
+        'H' => 'ℋ',
+        'I' => 'ℐ',
+        'J' => '𝒥',
+        'K' => '𝒦',
+        'L' => 'ℒ',
+        'M' => 'ℳ',
+        'N' => '𝒩',
+        'O' => '𝒪',
+        'P' => '𝒫',
+        'Q' => '𝒬',
+        'R' => 'ℛ',
+        'S' => '𝒮',
+        'T' => '𝒯',
+        'U' => '𝒰',
+        'V' => '𝒱',
+        'W' => '𝒲',
+        'X' => '𝒳',
+        'Y' => '𝒴',
         'Z' => '𝒵',
         _ => c,
     }
@@ -499,29 +658,97 @@ fn math_calligraphic(c: char) -> char {
 
 fn math_fraktur(c: char) -> char {
     match c {
-        'A' => '𝔄', 'B' => '𝔅', 'C' => 'ℭ', 'D' => '𝔇', 'E' => '𝔈',
-        'F' => '𝔉', 'G' => '𝔊', 'H' => 'ℌ', 'I' => 'ℑ', 'J' => '𝔍',
-        'K' => '𝔎', 'L' => '𝔏', 'M' => '𝔐', 'N' => '𝔑', 'O' => '𝔒',
-        'P' => '𝔓', 'Q' => '𝔔', 'R' => 'ℜ', 'S' => '𝔖', 'T' => '𝔗',
-        'U' => '𝔘', 'V' => '𝔙', 'W' => '𝔚', 'X' => '𝔛', 'Y' => '𝔜',
+        'A' => '𝔄',
+        'B' => '𝔅',
+        'C' => 'ℭ',
+        'D' => '𝔇',
+        'E' => '𝔈',
+        'F' => '𝔉',
+        'G' => '𝔊',
+        'H' => 'ℌ',
+        'I' => 'ℑ',
+        'J' => '𝔍',
+        'K' => '𝔎',
+        'L' => '𝔏',
+        'M' => '𝔐',
+        'N' => '𝔑',
+        'O' => '𝔒',
+        'P' => '𝔓',
+        'Q' => '𝔔',
+        'R' => 'ℜ',
+        'S' => '𝔖',
+        'T' => '𝔗',
+        'U' => '𝔘',
+        'V' => '𝔙',
+        'W' => '𝔚',
+        'X' => '𝔛',
+        'Y' => '𝔜',
         'Z' => 'ℨ',
-        'a' => '𝔞', 'b' => '𝔟', 'c' => '𝔠', 'd' => '𝔡', 'e' => '𝔢',
-        'f' => '𝔣', 'g' => '𝔤', 'h' => '𝔥', 'i' => '𝔦', 'j' => '𝔧',
-        'k' => '𝔨', 'l' => '𝔩', 'm' => '𝔪', 'n' => '𝔫', 'o' => '𝔬',
-        'p' => '𝔭', 'q' => '𝔮', 'r' => '𝔯', 's' => '𝔰', 't' => '𝔱',
-        'u' => '𝔲', 'v' => '𝔳', 'w' => '𝔴', 'x' => '𝔵', 'y' => '𝔶',
+        'a' => '𝔞',
+        'b' => '𝔟',
+        'c' => '𝔠',
+        'd' => '𝔡',
+        'e' => '𝔢',
+        'f' => '𝔣',
+        'g' => '𝔤',
+        'h' => '𝔥',
+        'i' => '𝔦',
+        'j' => '𝔧',
+        'k' => '𝔨',
+        'l' => '𝔩',
+        'm' => '𝔪',
+        'n' => '𝔫',
+        'o' => '𝔬',
+        'p' => '𝔭',
+        'q' => '𝔮',
+        'r' => '𝔯',
+        's' => '𝔰',
+        't' => '𝔱',
+        'u' => '𝔲',
+        'v' => '𝔳',
+        'w' => '𝔴',
+        'x' => '𝔵',
+        'y' => '𝔶',
         'z' => '𝔷',
         _ => c,
     }
 }
 
 fn is_operator_name(cmd: &str) -> bool {
-    matches!(cmd,
-        "log" | "ln" | "exp" | "sin" | "cos" | "tan" | "cot" | "sec" | "csc"
-        | "arcsin" | "arccos" | "arctan" | "sinh" | "cosh" | "tanh"
-        | "lim" | "limsup" | "liminf" | "sup" | "inf"
-        | "min" | "max" | "arg" | "det" | "dim" | "ker" | "hom"
-        | "deg" | "gcd" | "Pr" | "mod" | "bmod"
+    matches!(
+        cmd,
+        "log"
+            | "ln"
+            | "exp"
+            | "sin"
+            | "cos"
+            | "tan"
+            | "cot"
+            | "sec"
+            | "csc"
+            | "arcsin"
+            | "arccos"
+            | "arctan"
+            | "sinh"
+            | "cosh"
+            | "tanh"
+            | "lim"
+            | "limsup"
+            | "liminf"
+            | "sup"
+            | "inf"
+            | "min"
+            | "max"
+            | "arg"
+            | "det"
+            | "dim"
+            | "ker"
+            | "hom"
+            | "deg"
+            | "gcd"
+            | "Pr"
+            | "mod"
+            | "bmod"
     )
 }
 
@@ -529,118 +756,243 @@ fn is_operator_name(cmd: &str) -> bool {
 fn lookup_command(cmd: &str) -> Option<&'static str> {
     Some(match cmd {
         // Greek lowercase
-        "alpha" => "α", "beta" => "β", "gamma" => "γ", "delta" => "δ",
-        "epsilon" | "varepsilon" => "ε", "zeta" => "ζ", "eta" => "η",
-        "theta" => "θ", "vartheta" => "ϑ", "iota" => "ι", "kappa" => "κ",
-        "lambda" => "λ", "mu" => "μ", "nu" => "ν", "xi" => "ξ",
-        "pi" => "π", "varpi" => "ϖ", "rho" => "ρ", "varrho" => "ϱ",
-        "sigma" => "σ", "varsigma" => "ς", "tau" => "τ", "upsilon" => "υ",
-        "phi" => "φ", "varphi" => "ϕ", "chi" => "χ", "psi" => "ψ", "omega" => "ω",
+        "alpha" => "α",
+        "beta" => "β",
+        "gamma" => "γ",
+        "delta" => "δ",
+        "epsilon" | "varepsilon" => "ε",
+        "zeta" => "ζ",
+        "eta" => "η",
+        "theta" => "θ",
+        "vartheta" => "ϑ",
+        "iota" => "ι",
+        "kappa" => "κ",
+        "lambda" => "λ",
+        "mu" => "μ",
+        "nu" => "ν",
+        "xi" => "ξ",
+        "pi" => "π",
+        "varpi" => "ϖ",
+        "rho" => "ρ",
+        "varrho" => "ϱ",
+        "sigma" => "σ",
+        "varsigma" => "ς",
+        "tau" => "τ",
+        "upsilon" => "υ",
+        "phi" => "φ",
+        "varphi" => "ϕ",
+        "chi" => "χ",
+        "psi" => "ψ",
+        "omega" => "ω",
         // Greek uppercase
-        "Gamma" => "Γ", "Delta" => "Δ", "Theta" => "Θ", "Lambda" => "Λ",
-        "Xi" => "Ξ", "Pi" => "Π", "Sigma" => "Σ", "Upsilon" => "Υ",
-        "Phi" => "Φ", "Psi" => "Ψ", "Omega" => "Ω",
+        "Gamma" => "Γ",
+        "Delta" => "Δ",
+        "Theta" => "Θ",
+        "Lambda" => "Λ",
+        "Xi" => "Ξ",
+        "Pi" => "Π",
+        "Sigma" => "Σ",
+        "Upsilon" => "Υ",
+        "Phi" => "Φ",
+        "Psi" => "Ψ",
+        "Omega" => "Ω",
 
         // Arrows
-        "to" | "rightarrow" => "→", "leftarrow" | "gets" => "←",
+        "to" | "rightarrow" => "→",
+        "leftarrow" | "gets" => "←",
         "leftrightarrow" => "↔",
-        "Rightarrow" => "⇒", "Leftarrow" => "⇐", "Leftrightarrow" => "⇔",
-        "implies" => "⟹", "iff" => "⟺", "impliedby" => "⟸",
-        "uparrow" => "↑", "downarrow" => "↓", "updownarrow" => "↕",
-        "Uparrow" => "⇑", "Downarrow" => "⇓",
-        "mapsto" => "↦", "longmapsto" => "⟼",
-        "nearrow" => "↗", "searrow" => "↘", "swarrow" => "↙", "nwarrow" => "↖",
-        "hookrightarrow" => "↪", "hookleftarrow" => "↩",
-        "longrightarrow" => "⟶", "longleftarrow" => "⟵", "longleftrightarrow" => "⟷",
-        "Longrightarrow" => "⟹", "Longleftarrow" => "⟸", "Longleftrightarrow" => "⟺",
-        "rightrightarrows" => "⇉", "leftleftarrows" => "⇇",
-        "rightleftharpoons" => "⇌", "leftrightharpoons" => "⇋",
+        "Rightarrow" => "⇒",
+        "Leftarrow" => "⇐",
+        "Leftrightarrow" => "⇔",
+        "implies" => "⟹",
+        "iff" => "⟺",
+        "impliedby" => "⟸",
+        "uparrow" => "↑",
+        "downarrow" => "↓",
+        "updownarrow" => "↕",
+        "Uparrow" => "⇑",
+        "Downarrow" => "⇓",
+        "mapsto" => "↦",
+        "longmapsto" => "⟼",
+        "nearrow" => "↗",
+        "searrow" => "↘",
+        "swarrow" => "↙",
+        "nwarrow" => "↖",
+        "hookrightarrow" => "↪",
+        "hookleftarrow" => "↩",
+        "longrightarrow" => "⟶",
+        "longleftarrow" => "⟵",
+        "longleftrightarrow" => "⟷",
+        "Longrightarrow" => "⟹",
+        "Longleftarrow" => "⟸",
+        "Longleftrightarrow" => "⟺",
+        "rightrightarrows" => "⇉",
+        "leftleftarrows" => "⇇",
+        "rightleftharpoons" => "⇌",
+        "leftrightharpoons" => "⇋",
 
         // Binary operators
-        "times" => "×", "div" => "÷", "pm" => "±", "mp" => "∓",
-        "cdot" => "·", "circ" => "∘", "ast" => "∗", "star" => "⋆",
-        "bullet" => "∙", "oplus" => "⊕", "ominus" => "⊖",
-        "otimes" => "⊗", "odot" => "⊙", "oslash" => "⊘",
-        "dagger" => "†", "ddagger" => "‡",
-        "amalg" => "⨿", "wr" => "≀",
+        "times" => "×",
+        "div" => "÷",
+        "pm" => "±",
+        "mp" => "∓",
+        "cdot" => "·",
+        "circ" => "∘",
+        "ast" => "∗",
+        "star" => "⋆",
+        "bullet" => "∙",
+        "oplus" => "⊕",
+        "ominus" => "⊖",
+        "otimes" => "⊗",
+        "odot" => "⊙",
+        "oslash" => "⊘",
+        "dagger" => "†",
+        "ddagger" => "‡",
+        "amalg" => "⨿",
+        "wr" => "≀",
 
         // Relations
-        "leq" | "le" => "≤", "geq" | "ge" => "≥",
-        "neq" | "ne" => "≠", "approx" => "≈",
-        "sim" => "∼", "simeq" => "≃", "cong" => "≅",
-        "equiv" => "≡", "propto" => "∝",
-        "prec" => "≺", "succ" => "≻",
-        "preceq" => "⪯", "succeq" => "⪰",
-        "ll" => "≪", "gg" => "≫",
-        "subset" => "⊂", "supset" => "⊃",
-        "subseteq" => "⊆", "supseteq" => "⊇",
-        "sqsubseteq" => "⊑", "sqsupseteq" => "⊒",
-        "in" => "∈", "ni" | "owns" => "∋",
+        "leq" | "le" => "≤",
+        "geq" | "ge" => "≥",
+        "neq" | "ne" => "≠",
+        "approx" => "≈",
+        "sim" => "∼",
+        "simeq" => "≃",
+        "cong" => "≅",
+        "equiv" => "≡",
+        "propto" => "∝",
+        "prec" => "≺",
+        "succ" => "≻",
+        "preceq" => "⪯",
+        "succeq" => "⪰",
+        "ll" => "≪",
+        "gg" => "≫",
+        "subset" => "⊂",
+        "supset" => "⊃",
+        "subseteq" => "⊆",
+        "supseteq" => "⊇",
+        "sqsubseteq" => "⊑",
+        "sqsupseteq" => "⊒",
+        "in" => "∈",
+        "ni" | "owns" => "∋",
         "notin" => "∉",
-        "vdash" => "⊢", "dashv" => "⊣",
+        "vdash" => "⊢",
+        "dashv" => "⊣",
         "models" => "⊨",
-        "mid" => "∣", "nmid" => "∤",
-        "parallel" => "∥", "nparallel" => "∦",
+        "mid" => "∣",
+        "nmid" => "∤",
+        "parallel" => "∥",
+        "nparallel" => "∦",
         "perp" => "⊥",
-        "asymp" => "≍", "doteq" => "≐",
-        "triangleleft" => "◁", "triangleright" => "▷",
+        "asymp" => "≍",
+        "doteq" => "≐",
+        "triangleleft" => "◁",
+        "triangleright" => "▷",
 
         // Logic
-        "forall" => "∀", "exists" => "∃", "nexists" => "∄",
+        "forall" => "∀",
+        "exists" => "∃",
+        "nexists" => "∄",
         "neg" | "lnot" => "¬",
-        "land" | "wedge" => "∧", "lor" | "vee" => "∨",
-        "top" => "⊤", "bot" => "⊥",
-        "therefore" => "∴", "because" => "∵",
-        "vdots" => "⋮", "ddots" => "⋱", "iddots" => "⋰",
+        "land" | "wedge" => "∧",
+        "lor" | "vee" => "∨",
+        "top" => "⊤",
+        "bot" => "⊥",
+        "therefore" => "∴",
+        "because" => "∵",
+        "vdots" => "⋮",
+        "ddots" => "⋱",
+        "iddots" => "⋰",
 
         // Set theory
         "emptyset" | "varnothing" | "empty" => "∅",
-        "cap" => "∩", "cup" => "∪",
-        "setminus" => "∖", "complement" => "∁",
-        "bigcap" => "⋂", "bigcup" => "⋃",
+        "cap" => "∩",
+        "cup" => "∪",
+        "setminus" => "∖",
+        "complement" => "∁",
+        "bigcap" => "⋂",
+        "bigcup" => "⋃",
         "bigsqcup" => "⨆",
-        "sqcap" => "⊓", "sqcup" => "⊔",
+        "sqcap" => "⊓",
+        "sqcup" => "⊔",
 
         // Big operators
-        "sum" => "∑", "prod" => "∏", "coprod" => "∐",
-        "int" => "∫", "iint" => "∬", "iiint" => "∭",
-        "oint" => "∮", "oiint" => "∯",
-        "bigwedge" => "⋀", "bigvee" => "⋁",
-        "bigoplus" => "⨁", "bigotimes" => "⨂", "bigodot" => "⨀",
+        "sum" => "∑",
+        "prod" => "∏",
+        "coprod" => "∐",
+        "int" => "∫",
+        "iint" => "∬",
+        "iiint" => "∭",
+        "oint" => "∮",
+        "oiint" => "∯",
+        "bigwedge" => "⋀",
+        "bigvee" => "⋁",
+        "bigoplus" => "⨁",
+        "bigotimes" => "⨂",
+        "bigodot" => "⨀",
 
         // Misc symbols
-        "infty" => "∞", "partial" => "∂", "nabla" => "∇",
-        "hbar" => "ℏ", "ell" => "ℓ",
-        "Re" => "ℜ", "Im" => "ℑ",
-        "aleph" => "ℵ", "beth" => "ℶ", "gimel" => "ℷ",
-        "wp" => "℘", "angle" => "∠", "measuredangle" => "∡",
-        "triangle" => "△", "square" => "□", "Diamond" => "◇",
-        "lozenge" => "◊", "clubsuit" => "♣", "diamondsuit" => "♢",
-        "heartsuit" => "♡", "spadesuit" => "♠",
-        "flat" => "♭", "natural" => "♮", "sharp" => "♯",
+        "infty" => "∞",
+        "partial" => "∂",
+        "nabla" => "∇",
+        "hbar" => "ℏ",
+        "ell" => "ℓ",
+        "Re" => "ℜ",
+        "Im" => "ℑ",
+        "aleph" => "ℵ",
+        "beth" => "ℶ",
+        "gimel" => "ℷ",
+        "wp" => "℘",
+        "angle" => "∠",
+        "measuredangle" => "∡",
+        "triangle" => "△",
+        "square" => "□",
+        "Diamond" => "◇",
+        "lozenge" => "◊",
+        "clubsuit" => "♣",
+        "diamondsuit" => "♢",
+        "heartsuit" => "♡",
+        "spadesuit" => "♠",
+        "flat" => "♭",
+        "natural" => "♮",
+        "sharp" => "♯",
         "surd" => "√",
-        "prime" => "′", "backprime" => "‵",
-        "ldots" | "dots" | "dotsc" => "…", "cdots" | "dotsb" | "dotsi" | "dotsm" => "⋯",
-        "S" => "§", "P" => "¶",
+        "prime" => "′",
+        "backprime" => "‵",
+        "ldots" | "dots" | "dotsc" => "…",
+        "cdots" | "dotsb" | "dotsi" | "dotsm" => "⋯",
+        "S" => "§",
+        "P" => "¶",
         "checkmark" => "✓",
 
         // Delimiters
-        "langle" => "⟨", "rangle" => "⟩",
-        "lfloor" => "⌊", "rfloor" => "⌋",
-        "lceil" => "⌈", "rceil" => "⌉",
-        "lbrace" => "{", "rbrace" => "}",
-        "lbrack" => "[", "rbrack" => "]",
-        "vert" => "|", "Vert" => "‖",
-        "lVert" => "‖", "rVert" => "‖",
-        "lvert" => "|", "rvert" => "|",
+        "langle" => "⟨",
+        "rangle" => "⟩",
+        "lfloor" => "⌊",
+        "rfloor" => "⌋",
+        "lceil" => "⌈",
+        "rceil" => "⌉",
+        "lbrace" => "{",
+        "rbrace" => "}",
+        "lbrack" => "[",
+        "rbrack" => "]",
+        "vert" => "|",
+        "Vert" => "‖",
+        "lVert" => "‖",
+        "rVert" => "‖",
+        "lvert" => "|",
+        "rvert" => "|",
         "backslash" => "\\",
 
         // Spacing
-        "quad" => "  ", "qquad" => "    ",
-        "enspace" => " ", "thinspace" => "\u{2009}",
+        "quad" => "  ",
+        "qquad" => "    ",
+        "enspace" => " ",
+        "thinspace" => "\u{2009}",
 
         // Misc text
-        "LaTeX" => "LaTeX", "TeX" => "TeX",
+        "LaTeX" => "LaTeX",
+        "TeX" => "TeX",
         "amp" => "&",
         "colon" => ":",
 
@@ -786,10 +1138,7 @@ mod tests {
     #[test]
     fn mixed_complex() {
         assert_eq!(latex_to_unicode("\\alpha^{2} + \\beta_{i}"), "α² + βᵢ");
-        assert_eq!(
-            latex_to_unicode("\\sum_{i=0}^{n} x_i"),
-            "∑ᵢ₌₀ⁿ xᵢ"
-        );
+        assert_eq!(latex_to_unicode("\\sum_{i=0}^{n} x_i"), "∑ᵢ₌₀ⁿ xᵢ");
         assert_eq!(latex_to_unicode("\\int_0^1 f(x) dx"), "∫₀¹ f(x) dx");
     }
 
@@ -841,10 +1190,7 @@ mod tests {
 
     #[test]
     fn nested_frac() {
-        assert_eq!(
-            latex_to_unicode("\\frac{\\frac{a}{b}}{c}"),
-            "a/b/c"
-        );
+        assert_eq!(latex_to_unicode("\\frac{\\frac{a}{b}}{c}"), "a/b/c");
     }
 
     #[test]

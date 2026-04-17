@@ -12,10 +12,10 @@ use md4c::{
 };
 use ratatui::style::Style;
 use ratatui::text::{Line, Span as RSpan, Text};
-use unicode_width::UnicodeWidthStr;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
+use unicode_width::UnicodeWidthStr;
 
 // Thread-local cache for syntax-highlighted code blocks.
 // Key is hash of (content, language), value is the highlighted lines.
@@ -445,7 +445,11 @@ impl<'a> RendererState<'a> {
     }
 
     /// Wrap spans to fit within the configured width.
-    fn wrap_spans(&self, spans: Vec<RSpan<'static>>, prefix: Option<RSpan<'static>>) -> Vec<Line<'static>> {
+    fn wrap_spans(
+        &self,
+        spans: Vec<RSpan<'static>>,
+        prefix: Option<RSpan<'static>>,
+    ) -> Vec<Line<'static>> {
         let max_width = self.options.width;
         let prefix_len = prefix.as_ref().map(|p| p.content.width()).unwrap_or(0);
         let effective_width = max_width.saturating_sub(prefix_len);
@@ -494,7 +498,9 @@ impl<'a> RendererState<'a> {
                 }
 
                 // Find end of word
-                let word_end = remaining.find(char::is_whitespace).unwrap_or(remaining.len());
+                let word_end = remaining
+                    .find(char::is_whitespace)
+                    .unwrap_or(remaining.len());
                 let word = &remaining[..word_end];
                 remaining = &remaining[word_end..];
 
@@ -566,8 +572,10 @@ impl<'a> RendererState<'a> {
             40
         };
         let hr = self.theme.hr_char.to_string().repeat(width);
-        self.lines
-            .push(Line::from(vec![RSpan::styled(hr, self.theme.horizontal_rule)]));
+        self.lines.push(Line::from(vec![RSpan::styled(
+            hr,
+            self.theme.horizontal_rule,
+        )]));
     }
 
     fn render_table(&mut self) {
@@ -609,7 +617,11 @@ impl<'a> RendererState<'a> {
             for (col_idx, cell) in row.iter().enumerate() {
                 let cell_text: String = cell.iter().map(|s| s.content.to_string()).collect();
                 let width = col_widths.get(col_idx).copied().unwrap_or(3);
-                let align = self.table_alignments.get(col_idx).copied().unwrap_or(Alignment::Default);
+                let align = self
+                    .table_alignments
+                    .get(col_idx)
+                    .copied()
+                    .unwrap_or(Alignment::Default);
 
                 let text_width = cell_text.width();
                 let pad = width.saturating_sub(text_width);
@@ -644,7 +656,11 @@ impl<'a> RendererState<'a> {
                         // For header separator (row_idx == 0), show alignment markers
                         // For data row separators, use plain dashes
                         if row_idx == 0 {
-                            let align = self.table_alignments.get(i).copied().unwrap_or(Alignment::Default);
+                            let align = self
+                                .table_alignments
+                                .get(i)
+                                .copied()
+                                .unwrap_or(Alignment::Default);
                             match align {
                                 Alignment::Left => format!(":{}─", "─".repeat(*w)),
                                 Alignment::Right => format!("{}─:", "─".repeat(*w)),
@@ -792,7 +808,8 @@ impl ParserHandler for RendererState<'_> {
                 self.current_table_row = Vec::new();
             }
 
-            Block::TableHeaderCell(TableCellDetail { alignment }) | Block::TableCell(TableCellDetail { alignment }) => {
+            Block::TableHeaderCell(TableCellDetail { alignment })
+            | Block::TableCell(TableCellDetail { alignment }) => {
                 self.current_table_cell = Vec::new();
                 // Store alignment
                 let col_idx = self.current_table_row.len();
@@ -820,7 +837,11 @@ impl ParserHandler for RendererState<'_> {
             BlockType::Heading => {
                 // Record heading info
                 if let Some(level) = self.in_heading.take() {
-                    let text: String = self.current_spans.iter().map(|s| s.content.to_string()).collect();
+                    let text: String = self
+                        .current_spans
+                        .iter()
+                        .map(|s| s.content.to_string())
+                        .collect();
                     self.headings.push(HeadingInfo {
                         line: self.lines.len(),
                         level,
@@ -855,7 +876,8 @@ impl ParserHandler for RendererState<'_> {
                                 return cached.clone();
                             }
                             // Cache miss - highlight and store
-                            let lines = highlighter.highlight(&self.code_block_content, &self.code_block_lang);
+                            let lines = highlighter
+                                .highlight(&self.code_block_content, &self.code_block_lang);
                             if cache.len() >= HIGHLIGHT_CACHE_CAP {
                                 cache.clear();
                             }
@@ -915,11 +937,13 @@ impl ParserHandler for RendererState<'_> {
             BlockType::TableHead | BlockType::TableBody => {}
 
             BlockType::TableRow => {
-                self.table_rows.push(std::mem::take(&mut self.current_table_row));
+                self.table_rows
+                    .push(std::mem::take(&mut self.current_table_row));
             }
 
             BlockType::TableHeaderCell | BlockType::TableCell => {
-                self.current_table_row.push(std::mem::take(&mut self.current_table_cell));
+                self.current_table_row
+                    .push(std::mem::take(&mut self.current_table_cell));
             }
 
             // Handle any future variants
@@ -1023,8 +1047,10 @@ impl ParserHandler for RendererState<'_> {
                         if self.options.track_positions {
                             self.formatting_stack.pop();
                         }
-                        self.current_spans
-                            .push(RSpan::styled(format!(" ({})", detail.href), self.theme.link_url));
+                        self.current_spans.push(RSpan::styled(
+                            format!(" ({})", detail.href),
+                            self.theme.link_url,
+                        ));
                         return true;
                     }
                 }
@@ -1164,11 +1190,7 @@ impl ParserHandler for RendererState<'_> {
 /// let markdown = "# Hello\n\nThis is **bold** text.";
 /// let result = render(markdown, &Theme::default(), &RenderOptions::default());
 /// ```
-pub fn render(
-    markdown: &str,
-    theme: &Theme,
-    options: &RenderOptions,
-) -> RenderedMarkdown {
+pub fn render(markdown: &str, theme: &Theme, options: &RenderOptions) -> RenderedMarkdown {
     let mut state = RendererState::new(theme, options);
 
     // Initialize first line for position tracking
@@ -1213,7 +1235,11 @@ mod tests {
 
     #[test]
     fn test_basic_rendering() {
-        let result = render("Hello **world**", &Theme::default(), &RenderOptions::default());
+        let result = render(
+            "Hello **world**",
+            &Theme::default(),
+            &RenderOptions::default(),
+        );
         assert!(!result.text.lines.is_empty());
     }
 
@@ -1239,13 +1265,21 @@ mod tests {
 
     #[test]
     fn test_list() {
-        let result = render("- item 1\n- item 2", &Theme::default(), &RenderOptions::default());
+        let result = render(
+            "- item 1\n- item 2",
+            &Theme::default(),
+            &RenderOptions::default(),
+        );
         assert!(result.text.lines.len() >= 2);
     }
 
     #[test]
     fn test_code_block() {
-        let result = render("```rust\nfn main() {}\n```", &Theme::default(), &RenderOptions::default());
+        let result = render(
+            "```rust\nfn main() {}\n```",
+            &Theme::default(),
+            &RenderOptions::default(),
+        );
         assert!(result.text.lines.len() >= 1);
     }
 
@@ -1264,12 +1298,8 @@ mod tests {
     fn test_table_row_separators() {
         // Test that tables render with separators between all rows (not just header)
         let markdown = "| Name | Age | Status |\n|------|-----|--------|\n| Alice | 30 | Active |\n| Bob | 25 | Inactive |";
-        let result = render(
-            markdown,
-            &Theme::default(),
-            &RenderOptions::github(),
-        );
-        
+        let result = render(markdown, &Theme::default(), &RenderOptions::github());
+
         // Convert rendered lines to text for inspection
         let rendered_text: Vec<String> = result
             .text
@@ -1277,18 +1307,26 @@ mod tests {
             .iter()
             .map(|line| line.spans.iter().map(|s| s.content.to_string()).collect())
             .collect();
-        
+
         // Should have: top border + header + header separator + row1 + row separator + row2 + bottom border = 7 lines
         assert!(rendered_text.len() >= 7, "Table should have at least 7 lines (top, header, h-sep, row1, row-sep, row2, bottom), got {}", rendered_text.len());
-        
+
         // Verify separators exist (lines containing ├)
         let separator_count = rendered_text.iter().filter(|l| l.contains("├")).count();
-        assert_eq!(separator_count, 2, "Should have 2 separators (after header and after first data row), got {}", separator_count);
-        
+        assert_eq!(
+            separator_count, 2,
+            "Should have 2 separators (after header and after first data row), got {}",
+            separator_count
+        );
+
         // Verify both separators use ┼ for column junctions
         for line in &rendered_text {
             if line.contains("├") {
-                assert!(line.contains("┼"), "Separator line should contain column junctions (┼): {}", line);
+                assert!(
+                    line.contains("┼"),
+                    "Separator line should contain column junctions (┼): {}",
+                    line
+                );
             }
         }
     }

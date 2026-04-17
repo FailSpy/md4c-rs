@@ -146,15 +146,29 @@ impl Default for Theme {
             underline: Style::default().add_modifier(Modifier::UNDERLINED),
             code_inline: Style::default().fg(Color::Yellow),
             code_block: Style::default().fg(Color::White),
-            code_block_info: Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC),
-            link: Style::default().fg(Color::Cyan).add_modifier(Modifier::UNDERLINED),
+            code_block_info: Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::ITALIC),
+            link: Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::UNDERLINED),
             link_url: Style::default().fg(Color::DarkGray),
             image: Style::default().fg(Color::Magenta),
-            heading1: Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
-            heading2: Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
-            heading3: Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-            heading4: Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD),
-            heading5: Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
+            heading1: Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+            heading2: Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+            heading3: Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+            heading4: Style::default()
+                .fg(Color::Blue)
+                .add_modifier(Modifier::BOLD),
+            heading5: Style::default()
+                .fg(Color::Magenta)
+                .add_modifier(Modifier::BOLD),
             heading6: Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
             blockquote: Style::default().fg(Color::Gray),
             blockquote_marker: Style::default().fg(Color::DarkGray),
@@ -169,7 +183,9 @@ impl Default for Theme {
             html_entity: Style::default().fg(Color::Yellow),
             raw_html: Style::default().fg(Color::DarkGray),
             latex_math: Style::default().fg(Color::Magenta),
-            wiki_link: Style::default().fg(Color::Blue).add_modifier(Modifier::UNDERLINED),
+            wiki_link: Style::default()
+                .fg(Color::Blue)
+                .add_modifier(Modifier::UNDERLINED),
 
             bullet_char: '•',
             hr_char: '─',
@@ -237,22 +253,46 @@ impl Theme {
     pub fn dark() -> Self {
         Self {
             text: Style::default().fg(Color::White),
-            emphasis: Style::default().fg(Color::White).add_modifier(Modifier::ITALIC),
-            strong: Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
-            strikethrough: Style::default().fg(Color::Gray).add_modifier(Modifier::CROSSED_OUT),
-            underline: Style::default().fg(Color::White).add_modifier(Modifier::UNDERLINED),
+            emphasis: Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::ITALIC),
+            strong: Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+            strikethrough: Style::default()
+                .fg(Color::Gray)
+                .add_modifier(Modifier::CROSSED_OUT),
+            underline: Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::UNDERLINED),
             code_inline: Style::default().fg(Color::LightYellow).bg(Color::DarkGray),
             code_block: Style::default().fg(Color::LightYellow),
-            code_block_info: Style::default().fg(Color::Gray).add_modifier(Modifier::ITALIC),
-            link: Style::default().fg(Color::LightCyan).add_modifier(Modifier::UNDERLINED),
+            code_block_info: Style::default()
+                .fg(Color::Gray)
+                .add_modifier(Modifier::ITALIC),
+            link: Style::default()
+                .fg(Color::LightCyan)
+                .add_modifier(Modifier::UNDERLINED),
             link_url: Style::default().fg(Color::Gray),
             image: Style::default().fg(Color::LightMagenta),
-            heading1: Style::default().fg(Color::LightCyan).add_modifier(Modifier::BOLD),
-            heading2: Style::default().fg(Color::LightGreen).add_modifier(Modifier::BOLD),
-            heading3: Style::default().fg(Color::LightYellow).add_modifier(Modifier::BOLD),
-            heading4: Style::default().fg(Color::LightBlue).add_modifier(Modifier::BOLD),
-            heading5: Style::default().fg(Color::LightMagenta).add_modifier(Modifier::BOLD),
-            heading6: Style::default().fg(Color::LightRed).add_modifier(Modifier::BOLD),
+            heading1: Style::default()
+                .fg(Color::LightCyan)
+                .add_modifier(Modifier::BOLD),
+            heading2: Style::default()
+                .fg(Color::LightGreen)
+                .add_modifier(Modifier::BOLD),
+            heading3: Style::default()
+                .fg(Color::LightYellow)
+                .add_modifier(Modifier::BOLD),
+            heading4: Style::default()
+                .fg(Color::LightBlue)
+                .add_modifier(Modifier::BOLD),
+            heading5: Style::default()
+                .fg(Color::LightMagenta)
+                .add_modifier(Modifier::BOLD),
+            heading6: Style::default()
+                .fg(Color::LightRed)
+                .add_modifier(Modifier::BOLD),
             blockquote: Style::default().fg(Color::Gray),
             blockquote_marker: Style::default().fg(Color::DarkGray),
             horizontal_rule: Style::default().fg(Color::DarkGray),
@@ -260,13 +300,17 @@ impl Theme {
             list_number: Style::default().fg(Color::LightCyan),
             task_unchecked: Style::default().fg(Color::Gray),
             task_checked: Style::default().fg(Color::LightGreen),
-            table_header: Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+            table_header: Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
             table_cell: Style::default().fg(Color::White),
             table_border: Style::default().fg(Color::DarkGray),
             html_entity: Style::default().fg(Color::LightYellow),
             raw_html: Style::default().fg(Color::Gray),
             latex_math: Style::default().fg(Color::LightMagenta),
-            wiki_link: Style::default().fg(Color::LightBlue).add_modifier(Modifier::UNDERLINED),
+            wiki_link: Style::default()
+                .fg(Color::LightBlue)
+                .add_modifier(Modifier::UNDERLINED),
             ..Self::default()
         }
     }
@@ -275,22 +319,44 @@ impl Theme {
     pub fn light() -> Self {
         Self {
             text: Style::default().fg(Color::Black),
-            emphasis: Style::default().fg(Color::Black).add_modifier(Modifier::ITALIC),
-            strong: Style::default().fg(Color::Black).add_modifier(Modifier::BOLD),
-            strikethrough: Style::default().fg(Color::DarkGray).add_modifier(Modifier::CROSSED_OUT),
-            underline: Style::default().fg(Color::Black).add_modifier(Modifier::UNDERLINED),
+            emphasis: Style::default()
+                .fg(Color::Black)
+                .add_modifier(Modifier::ITALIC),
+            strong: Style::default()
+                .fg(Color::Black)
+                .add_modifier(Modifier::BOLD),
+            strikethrough: Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::CROSSED_OUT),
+            underline: Style::default()
+                .fg(Color::Black)
+                .add_modifier(Modifier::UNDERLINED),
             code_inline: Style::default().fg(Color::Red),
             code_block: Style::default().fg(Color::Black),
-            code_block_info: Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC),
-            link: Style::default().fg(Color::Blue).add_modifier(Modifier::UNDERLINED),
+            code_block_info: Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::ITALIC),
+            link: Style::default()
+                .fg(Color::Blue)
+                .add_modifier(Modifier::UNDERLINED),
             link_url: Style::default().fg(Color::DarkGray),
             image: Style::default().fg(Color::Magenta),
-            heading1: Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD),
-            heading2: Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
-            heading3: Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
-            heading4: Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            heading1: Style::default()
+                .fg(Color::Blue)
+                .add_modifier(Modifier::BOLD),
+            heading2: Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+            heading3: Style::default()
+                .fg(Color::Magenta)
+                .add_modifier(Modifier::BOLD),
+            heading4: Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
             heading5: Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-            heading6: Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            heading6: Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
             blockquote: Style::default().fg(Color::DarkGray),
             blockquote_marker: Style::default().fg(Color::Gray),
             horizontal_rule: Style::default().fg(Color::Gray),
@@ -298,13 +364,17 @@ impl Theme {
             list_number: Style::default().fg(Color::Blue),
             task_unchecked: Style::default().fg(Color::DarkGray),
             task_checked: Style::default().fg(Color::Green),
-            table_header: Style::default().fg(Color::Black).add_modifier(Modifier::BOLD),
+            table_header: Style::default()
+                .fg(Color::Black)
+                .add_modifier(Modifier::BOLD),
             table_cell: Style::default().fg(Color::Black),
             table_border: Style::default().fg(Color::Gray),
             html_entity: Style::default().fg(Color::Red),
             raw_html: Style::default().fg(Color::DarkGray),
             latex_math: Style::default().fg(Color::Magenta),
-            wiki_link: Style::default().fg(Color::Blue).add_modifier(Modifier::UNDERLINED),
+            wiki_link: Style::default()
+                .fg(Color::Blue)
+                .add_modifier(Modifier::UNDERLINED),
             ..Self::default()
         }
     }

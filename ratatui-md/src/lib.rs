@@ -120,7 +120,9 @@ pub mod widget;
 pub use highlight::SyntaxHighlighter;
 pub use latex::latex_to_unicode;
 pub use position_map::{CharMapping, FormatMark, PositionMap};
-pub use renderer::{render, render_default, HeadingInfo, LinkInfo, RenderOptions, RenderedMarkdown};
+pub use renderer::{
+    render, render_default, HeadingInfo, LinkInfo, RenderOptions, RenderedMarkdown,
+};
 pub use theme::Theme;
 pub use widget::{Markdown, MarkdownSpan, MarkdownView, MarkdownViewWidget};
 
@@ -175,13 +177,27 @@ mod tests {
             .text
             .lines
             .iter()
-            .map(|l| l.spans.iter().map(|s| s.content.to_string()).collect::<String>())
+            .map(|l| {
+                l.spans
+                    .iter()
+                    .map(|s| s.content.to_string())
+                    .collect::<String>()
+            })
             .collect::<Vec<_>>()
             .join("\n");
 
-        assert!(all_text.contains("• Item 1"), "Should contain bullet for Item 1");
-        assert!(all_text.contains("• Item 2"), "Should contain bullet for Item 2");
-        assert!(all_text.contains("• Item 3"), "Should contain bullet for Item 3");
+        assert!(
+            all_text.contains("• Item 1"),
+            "Should contain bullet for Item 1"
+        );
+        assert!(
+            all_text.contains("• Item 2"),
+            "Should contain bullet for Item 2"
+        );
+        assert!(
+            all_text.contains("• Item 3"),
+            "Should contain bullet for Item 3"
+        );
     }
 
     #[test]
@@ -197,13 +213,27 @@ mod tests {
             .text
             .lines
             .iter()
-            .map(|l| l.spans.iter().map(|s| s.content.to_string()).collect::<String>())
+            .map(|l| {
+                l.spans
+                    .iter()
+                    .map(|s| s.content.to_string())
+                    .collect::<String>()
+            })
             .collect::<Vec<_>>()
             .join("\n");
 
-        assert!(all_text.contains("• Item 1"), "Should contain bullet for Item 1");
-        assert!(all_text.contains("• Item 2"), "Should contain bullet for Item 2");
-        assert!(all_text.contains("• Item 3"), "Should contain bullet for Item 3");
+        assert!(
+            all_text.contains("• Item 1"),
+            "Should contain bullet for Item 1"
+        );
+        assert!(
+            all_text.contains("• Item 2"),
+            "Should contain bullet for Item 2"
+        );
+        assert!(
+            all_text.contains("• Item 3"),
+            "Should contain bullet for Item 3"
+        );
     }
 
     #[test]
@@ -220,23 +250,50 @@ mod tests {
             .text
             .lines
             .iter()
-            .map(|l| l.spans.iter().map(|s| s.content.to_string()).collect::<String>())
+            .map(|l| {
+                l.spans
+                    .iter()
+                    .map(|s| s.content.to_string())
+                    .collect::<String>()
+            })
             .collect();
 
         // Each list item should be on its own line - this is the critical bug fix:
         // Previously "Item 2" and "Nested 2.1" would appear on the same line
-        assert!(lines.iter().any(|l| l.contains("Item 1")), "Should have Item 1");
-        assert!(lines.iter().any(|l| l.contains("Item 2") && !l.contains("Nested")),
-            "Item 2 should be on its own line without nested items. Lines: {:?}", lines);
-        assert!(lines.iter().any(|l| l.contains("Nested 2.1") && !l.contains("Item 2")),
-            "Nested 2.1 should be on its own line without parent. Lines: {:?}", lines);
-        assert!(lines.iter().any(|l| l.contains("Nested 2.2")), "Should have Nested 2.2");
-        assert!(lines.iter().any(|l| l.contains("Item 3")), "Should have Item 3");
+        assert!(
+            lines.iter().any(|l| l.contains("Item 1")),
+            "Should have Item 1"
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.contains("Item 2") && !l.contains("Nested")),
+            "Item 2 should be on its own line without nested items. Lines: {:?}",
+            lines
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.contains("Nested 2.1") && !l.contains("Item 2")),
+            "Nested 2.1 should be on its own line without parent. Lines: {:?}",
+            lines
+        );
+        assert!(
+            lines.iter().any(|l| l.contains("Nested 2.2")),
+            "Should have Nested 2.2"
+        );
+        assert!(
+            lines.iter().any(|l| l.contains("Item 3")),
+            "Should have Item 3"
+        );
 
         // Nested items should be indented (start with spaces before the bullet)
         let nested_line = lines.iter().find(|l| l.contains("Nested 2.1")).unwrap();
-        assert!(nested_line.starts_with("  "),
-            "Nested items should be indented with 2 spaces, got: {:?}", nested_line);
+        assert!(
+            nested_line.starts_with("  "),
+            "Nested items should be indented with 2 spaces, got: {:?}",
+            nested_line
+        );
     }
 
     #[test]
@@ -253,13 +310,26 @@ mod tests {
             .text
             .lines
             .iter()
-            .map(|l| l.spans.iter().map(|s| s.content.to_string()).collect::<String>())
+            .map(|l| {
+                l.spans
+                    .iter()
+                    .map(|s| s.content.to_string())
+                    .collect::<String>()
+            })
             .collect();
 
         // Each list item should be on its own line
-        assert!(lines.iter().any(|l| l.contains("Second") && !l.contains("Nested")),
-            "Second should be on its own line without nested items: {:?}", lines);
-        assert!(lines.iter().any(|l| l.contains("Nested 2.1")), "Should have Nested 2.1");
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.contains("Second") && !l.contains("Nested")),
+            "Second should be on its own line without nested items: {:?}",
+            lines
+        );
+        assert!(
+            lines.iter().any(|l| l.contains("Nested 2.1")),
+            "Should have Nested 2.1"
+        );
     }
 
     #[test]
@@ -268,19 +338,32 @@ mod tests {
         let md = "## Project Structure\n\nSource code: src/ directory with modules for:\n\n- Main application (main.rs, app.rs)\n- Conversation handling (conversation/ module)";
 
         let theme = Theme::dark();
-        let options = RenderOptions::github().with_width(80).with_hard_breaks(true);
+        let options = RenderOptions::github()
+            .with_width(80)
+            .with_hard_breaks(true);
         let result = render(md, &theme, &options);
 
         let all_text: String = result
             .text
             .lines
             .iter()
-            .map(|l| l.spans.iter().map(|s| s.content.to_string()).collect::<String>())
+            .map(|l| {
+                l.spans
+                    .iter()
+                    .map(|s| s.content.to_string())
+                    .collect::<String>()
+            })
             .collect::<Vec<_>>()
             .join("\n");
 
-        assert!(all_text.contains("• Main application"), "Should contain bullet for Main application");
-        assert!(all_text.contains("• Conversation handling"), "Should contain bullet for Conversation handling");
+        assert!(
+            all_text.contains("• Main application"),
+            "Should contain bullet for Main application"
+        );
+        assert!(
+            all_text.contains("• Conversation handling"),
+            "Should contain bullet for Conversation handling"
+        );
     }
 
     #[test]
@@ -294,14 +377,23 @@ mod tests {
 
         // Each line should be on a separate Line in the output
         let line_count = result.text.lines.len();
-        assert!(line_count >= 3, "Should have at least 3 lines, got {}", line_count);
+        assert!(
+            line_count >= 3,
+            "Should have at least 3 lines, got {}",
+            line_count
+        );
 
         // Check content
         let all_text: String = result
             .text
             .lines
             .iter()
-            .map(|l| l.spans.iter().map(|s| s.content.to_string()).collect::<String>())
+            .map(|l| {
+                l.spans
+                    .iter()
+                    .map(|s| s.content.to_string())
+                    .collect::<String>()
+            })
             .collect::<Vec<_>>()
             .join("\n");
 
@@ -321,6 +413,10 @@ mod tests {
 
         // Each tree line should be on a separate Line
         let line_count = result.text.lines.len();
-        assert!(line_count >= 4, "Should have at least 4 lines for tree, got {}", line_count);
+        assert!(
+            line_count >= 4,
+            "Should have at least 4 lines for tree, got {}",
+            line_count
+        );
     }
 }

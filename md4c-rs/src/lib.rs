@@ -129,7 +129,9 @@ pub mod types;
 pub mod html;
 
 // Re-export main types at crate root
-pub use parser::{parse, parse_to_events, Event, ParseError, ParseResult, ParserFlags, ParserHandler};
+pub use parser::{
+    parse, parse_to_events, Event, ParseError, ParseResult, ParserFlags, ParserHandler,
+};
 pub use types::{
     Alignment, Block, BlockType, CodeBlockDetail, FenceChar, HeadingDetail, ImageDetail,
     LinkDetail, ListItemDetail, ListMark, OrderedListDelimiter, OrderedListDetail, Span, SpanType,
@@ -150,11 +152,7 @@ pub use html::{render_html, render_html_streaming, HtmlError, HtmlFlags, HtmlRes
 /// ```
 #[cfg(feature = "html")]
 pub fn to_html(markdown: &str) -> HtmlResult<String> {
-    render_html(
-        markdown,
-        ParserFlags::commonmark(),
-        html::HtmlFlags::new(),
-    )
+    render_html(markdown, ParserFlags::commonmark(), html::HtmlFlags::new())
 }
 
 /// Convenience function to render GitHub-flavored markdown to HTML
@@ -216,7 +214,12 @@ mod tests {
             spans: 0,
             texts: 0,
         };
-        parse("**bold** and *italic*", ParserFlags::commonmark(), &mut counter).unwrap();
+        parse(
+            "**bold** and *italic*",
+            ParserFlags::commonmark(),
+            &mut counter,
+        )
+        .unwrap();
 
         assert!(counter.blocks > 0);
         assert!(counter.spans > 0);
@@ -251,7 +254,12 @@ mod tests {
         }
 
         let mut checker = HeadingChecker { levels: vec![] };
-        parse("# H1\n## H2\n### H3", ParserFlags::commonmark(), &mut checker).unwrap();
+        parse(
+            "# H1\n## H2\n### H3",
+            ParserFlags::commonmark(),
+            &mut checker,
+        )
+        .unwrap();
         assert_eq!(checker.levels, vec![1, 2, 3]);
     }
 
@@ -302,8 +310,15 @@ mod tests {
             }
         }
 
-        let mut checker = CodeChecker { lang: String::new() };
-        parse("```rust\nfn main() {}\n```", ParserFlags::commonmark(), &mut checker).unwrap();
+        let mut checker = CodeChecker {
+            lang: String::new(),
+        };
+        parse(
+            "```rust\nfn main() {}\n```",
+            ParserFlags::commonmark(),
+            &mut checker,
+        )
+        .unwrap();
         assert_eq!(checker.lang, "rust");
     }
 

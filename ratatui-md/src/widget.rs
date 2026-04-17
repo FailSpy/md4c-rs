@@ -242,11 +242,7 @@ impl MarkdownView {
     /// Select the next link.
     pub fn select_next_link(&mut self) {
         self.ensure_rendered();
-        let link_count = self
-            .rendered
-            .as_ref()
-            .map(|r| r.links.len())
-            .unwrap_or(0);
+        let link_count = self.rendered.as_ref().map(|r| r.links.len()).unwrap_or(0);
 
         if link_count == 0 {
             return;
@@ -261,11 +257,7 @@ impl MarkdownView {
     /// Select the previous link.
     pub fn select_prev_link(&mut self) {
         self.ensure_rendered();
-        let link_count = self
-            .rendered
-            .as_ref()
-            .map(|r| r.links.len())
-            .unwrap_or(0);
+        let link_count = self.rendered.as_ref().map(|r| r.links.len()).unwrap_or(0);
 
         if link_count == 0 {
             return;

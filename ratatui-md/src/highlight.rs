@@ -95,16 +95,13 @@ mod syntect_impl {
                 .or_else(|| syntax_set.find_syntax_by_extension(language))
                 .unwrap_or_else(|| syntax_set.find_syntax_plain_text());
 
-            let theme = theme_set
-                .themes
-                .get(&self.theme_name)
-                .unwrap_or_else(|| {
-                    theme_set
-                        .themes
-                        .values()
-                        .next()
-                        .expect("No themes available")
-                });
+            let theme = theme_set.themes.get(&self.theme_name).unwrap_or_else(|| {
+                theme_set
+                    .themes
+                    .values()
+                    .next()
+                    .expect("No themes available")
+            });
 
             let mut highlighter = HighlightLines::new(syntax, theme);
             let mut lines = Vec::new();
@@ -117,11 +114,8 @@ mod syntect_impl {
                 let spans: Vec<Span<'static>> = ranges
                     .into_iter()
                     .map(|(style, text)| {
-                        let fg = Color::Rgb(
-                            style.foreground.r,
-                            style.foreground.g,
-                            style.foreground.b,
-                        );
+                        let fg =
+                            Color::Rgb(style.foreground.r, style.foreground.g, style.foreground.b);
 
                         let mut ratatui_style = Style::default().fg(fg);
 

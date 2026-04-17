@@ -105,7 +105,12 @@ fn bench_parsing(c: &mut Criterion) {
     group.bench_function("simple_parse", |b| {
         b.iter(|| {
             let mut handler = NullHandler;
-            parse(black_box(SIMPLE_MD), ParserFlags::commonmark(), &mut handler).unwrap();
+            parse(
+                black_box(SIMPLE_MD),
+                ParserFlags::commonmark(),
+                &mut handler,
+            )
+            .unwrap();
         });
     });
 
@@ -113,7 +118,12 @@ fn bench_parsing(c: &mut Criterion) {
     group.bench_function("complex_parse_commonmark", |b| {
         b.iter(|| {
             let mut handler = NullHandler;
-            parse(black_box(COMPLEX_MD), ParserFlags::commonmark(), &mut handler).unwrap();
+            parse(
+                black_box(COMPLEX_MD),
+                ParserFlags::commonmark(),
+                &mut handler,
+            )
+            .unwrap();
         });
     });
 

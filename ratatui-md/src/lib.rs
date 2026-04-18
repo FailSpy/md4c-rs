@@ -121,7 +121,7 @@ pub use highlight::SyntaxHighlighter;
 pub use latex::latex_to_unicode;
 pub use position_map::{CharMapping, FormatMark, PositionMap};
 pub use renderer::{
-    render, render_default, HeadingInfo, LinkInfo, RenderOptions, RenderedMarkdown,
+    render, render_default, HeadingInfo, LinkInfo, RenderOptions, RenderedMarkdown, TableMode,
 };
 pub use theme::Theme;
 pub use widget::{Markdown, MarkdownSpan, MarkdownView, MarkdownViewWidget};

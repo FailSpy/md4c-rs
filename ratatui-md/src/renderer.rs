@@ -33,6 +33,21 @@ fn hash_code_block(content: &str, lang: &str) -> u64 {
     hasher.finish()
 }
 
+/// Strategy for rendering tables that exceed the viewport width.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TableMode {
+    /// Shrink column widths proportionally to fit the viewport, word-wrap
+    /// each cell within its column. Overflow beyond min column widths falls
+    /// back to truncation with a `▶` indicator.
+    #[default]
+    SqueezeWrap,
+    /// Render at natural column widths and clip lines that exceed the
+    /// viewport, marking truncation with a trailing `▶`.
+    Truncate,
+    /// Render at natural column widths with no viewport-aware adjustment.
+    Natural,
+}
+
 /// Render options for the markdown renderer.
 #[derive(Debug, Clone)]
 pub struct RenderOptions {
@@ -58,6 +73,10 @@ pub struct RenderOptions {
     /// Track character positions for selection/extraction support.
     /// When enabled, builds a PositionMap with formatting context per character.
     pub track_positions: bool,
+    /// How to render tables when they exceed `width`. Ignored when `width == 0`.
+    pub table_mode: TableMode,
+    /// Minimum column width when squeezing tables (in display cells).
+    pub min_column_width: usize,
 }
 
 impl Default for RenderOptions {
@@ -73,6 +92,8 @@ impl Default for RenderOptions {
             syntax_highlighting: false,
             syntax_theme: "base16-ocean.dark".to_string(),
             track_positions: false,
+            table_mode: TableMode::default(),
+            min_column_width: 4,
         }
     }
 }
@@ -151,6 +172,18 @@ impl RenderOptions {
         self.track_positions = enabled;
         self
     }
+
+    /// Set the table rendering strategy. See [`TableMode`].
+    pub fn with_table_mode(mut self, mode: TableMode) -> Self {
+        self.table_mode = mode;
+        self
+    }
+
+    /// Set the minimum column width when squeezing tables.
+    pub fn with_min_column_width(mut self, width: usize) -> Self {
+        self.min_column_width = width.max(1);
+        self
+    }
 }
 
 /// A rendered markdown document.
@@ -194,6 +227,127 @@ pub struct HeadingInfo {
     pub level: u8,
     /// Heading text content
     pub text: String,
+}
+
+/// Word-wrap a sequence of styled spans to `effective_width` cells.
+///
+/// Preserves per-span style. Breaks at whitespace between words. Single
+/// words longer than `effective_width` overflow their line (never dropped).
+/// Returns at least one line (possibly empty) to match the contract of
+/// higher-level wrappers.
+fn wrap_spans_to_width(
+    spans: &[RSpan<'static>],
+    effective_width: usize,
+) -> Vec<Vec<RSpan<'static>>> {
+    if effective_width == 0 {
+        return vec![spans.to_vec()];
+    }
+
+    let mut lines: Vec<Vec<RSpan<'static>>> = Vec::new();
+    let mut current_line: Vec<RSpan<'static>> = Vec::new();
+    let mut current_width = 0usize;
+
+    for span in spans {
+        let style = span.style;
+        let text = span.content.as_ref();
+
+        let mut remaining = text;
+        while !remaining.is_empty() {
+            let trimmed = remaining.trim_start();
+            let leading_space = remaining.len() - trimmed.len();
+
+            if leading_space > 0 {
+                if current_width == 0 && lines.is_empty() && current_line.is_empty() {
+                    // Preserve leading whitespace at the very start (e.g., list indent).
+                    let indent_str = " ".repeat(leading_space);
+                    current_line.push(RSpan::styled(indent_str, style));
+                    current_width += leading_space;
+                } else if current_width > 0 && current_width < effective_width {
+                    current_line.push(RSpan::styled(" ".to_string(), style));
+                    current_width += 1;
+                }
+            }
+
+            remaining = trimmed;
+            if remaining.is_empty() {
+                break;
+            }
+
+            let word_end = remaining
+                .find(char::is_whitespace)
+                .unwrap_or(remaining.len());
+            let word = &remaining[..word_end];
+            remaining = &remaining[word_end..];
+
+            if current_width + word.width() > effective_width && current_width > 0 {
+                lines.push(std::mem::take(&mut current_line));
+                current_width = 0;
+            }
+
+            if !word.is_empty() {
+                current_line.push(RSpan::styled(word.to_string(), style));
+                current_width += word.width();
+            }
+        }
+    }
+
+    if !current_line.is_empty() || lines.is_empty() {
+        lines.push(current_line);
+    }
+
+    lines
+}
+
+/// Clip a line to `max_width` display cells, appending a `▶` truncation
+/// marker when clipping occurs. Preserves the style of the last visible span
+/// for the marker.
+fn truncate_line_to_width(line: Line<'static>, max_width: usize) -> Line<'static> {
+    if max_width == 0 {
+        return line;
+    }
+
+    let total: usize = line.spans.iter().map(|s| s.content.width()).sum();
+    if total <= max_width {
+        return line;
+    }
+
+    let marker = "▶";
+    let marker_w = marker.width();
+    let budget = max_width.saturating_sub(marker_w);
+
+    let mut out: Vec<RSpan<'static>> = Vec::new();
+    let mut used = 0usize;
+    let mut last_style: Option<Style> = None;
+
+    for span in line.spans {
+        let style = span.style;
+        last_style = Some(style);
+        let w = span.content.width();
+        if used + w <= budget {
+            out.push(span);
+            used += w;
+        } else {
+            let mut acc = String::new();
+            let mut acc_w = 0usize;
+            let remaining = budget.saturating_sub(used);
+            for ch in span.content.chars() {
+                let ch_w = ch.to_string().width();
+                if acc_w + ch_w > remaining {
+                    break;
+                }
+                acc.push(ch);
+                acc_w += ch_w;
+            }
+            if !acc.is_empty() {
+                out.push(RSpan::styled(acc, style));
+            }
+            break;
+        }
+    }
+
+    let style = last_style.unwrap_or_default();
+    out.push(RSpan::styled(marker.to_string(), style));
+    Line::from(out)
 }
 
 /// Internal state for the renderer.
@@ -454,84 +608,16 @@ impl<'a> RendererState<'a> {
         let prefix_len = prefix.as_ref().map(|p| p.content.width()).unwrap_or(0);
         let effective_width = max_width.saturating_sub(prefix_len);
 
-        if effective_width == 0 {
-            let mut result = spans;
-            if let Some(p) = prefix {
-                result.insert(0, p);
-            }
-            return vec![Line::from(result)];
-        }
-
-        let mut lines: Vec<Line<'static>> = Vec::new();
-        let mut current_line: Vec<RSpan<'static>> = Vec::new();
-        let mut current_width = 0usize;
-
-        for span in spans {
-            let style = span.style;
-            let text = span.content.to_string();
-
-            // Split by words
-            let mut remaining = text.as_str();
-            while !remaining.is_empty() {
-                // Find next word boundary
-                let trimmed = remaining.trim_start();
-                let leading_space = remaining.len() - trimmed.len();
-
-                if leading_space > 0 {
-                    if current_width == 0 && lines.is_empty() && current_line.is_empty() {
-                        // Preserve leading whitespace at the very start (e.g., list indent)
-                        let indent_str = " ".repeat(leading_space);
-                        current_line.push(RSpan::styled(indent_str, style));
-                        current_width += leading_space;
-                    } else if current_width > 0 {
-                        // Between words - add single space
-                        if current_width < effective_width {
-                            current_line.push(RSpan::styled(" ".to_string(), style));
-                            current_width += 1;
-                        }
-                    }
+        let wrapped = wrap_spans_to_width(&spans, effective_width);
+        wrapped
+            .into_iter()
+            .map(|mut line_spans| {
+                if let Some(ref p) = prefix {
+                    line_spans.insert(0, p.clone());
                 }
-
-                remaining = trimmed;
-                if remaining.is_empty() {
-                    break;
-                }
-
-                // Find end of word
-                let word_end = remaining
-                    .find(char::is_whitespace)
-                    .unwrap_or(remaining.len());
-                let word = &remaining[..word_end];
-                remaining = &remaining[word_end..];
-
-                // Check if word fits on current line
-                if current_width + word.width() > effective_width && current_width > 0 {
-                    // Start new line
-                    let mut line_spans = std::mem::take(&mut current_line);
-                    if let Some(ref p) = prefix {
-                        line_spans.insert(0, p.clone());
-                    }
-                    lines.push(Line::from(line_spans));
-                    current_width = 0;
-                }
-
-                // Add word (possibly to new line)
-                if !word.is_empty() {
-                    current_line.push(RSpan::styled(word.to_string(), style));
-                    current_width += word.width();
-                }
-            }
-        }
-
-        // Add remaining content
-        if !current_line.is_empty() || lines.is_empty() {
-            if let Some(p) = prefix {
-                current_line.insert(0, p);
-            }
-            lines.push(Line::from(current_line));
-        }
-
-        lines
+                Line::from(line_spans)
+            })
+            .collect()
     }
 
     fn add_blank_line(&mut self) {
@@ -578,86 +664,185 @@ impl<'a> RendererState<'a> {
         )]));
     }
 
+    /// Append a fully-rendered table line to `self.lines`, optionally clipping
+    /// it to the viewport width with a `▶` marker. Keeps `position_map` in
+    /// sync when tracking is enabled so that line indexes past the table
+    /// remain valid for selection.
+    fn push_table_line(&mut self, line: Line<'static>, truncate: bool) {
+        let line = if truncate && self.options.width > 0 {
+            truncate_line_to_width(line, self.options.width)
+        } else {
+            line
+        };
+        self.lines.push(line);
+        if self.options.track_positions {
+            self.position_map.start_line();
+        }
+    }
+
     fn render_table(&mut self) {
         if self.table_rows.is_empty() {
             return;
         }
 
-        // Calculate column widths
-        let mut col_widths: Vec<usize> = vec![0; self.table_columns];
+        let cols = self.table_columns;
+        if cols == 0 {
+            self.table_rows.clear();
+            self.table_alignments.clear();
+            return;
+        }
+
+        // Natural column widths (max content width per column).
+        let mut natural: Vec<usize> = vec![0; cols];
         for row in &self.table_rows {
             for (i, cell) in row.iter().enumerate() {
-                if i < col_widths.len() {
-                    let cell_width: usize = cell.iter().map(|s| s.content.width()).sum();
-                    col_widths[i] = col_widths[i].max(cell_width);
+                if i < cols {
+                    let w: usize = cell.iter().map(|s| s.content.width()).sum();
+                    natural[i] = natural[i].max(w);
                 }
             }
         }
-
-        // Ensure minimum width
-        for w in &mut col_widths {
+        for w in &mut natural {
             *w = (*w).max(3);
         }
 
-        // Render top border
+        let available = self.options.width;
+        let mode = self.options.table_mode;
+        let min_col = self.options.min_column_width.max(1);
+        // Per-row border overhead: leading "│ " (2) + per-column " │ " (3).
+        let border_overhead = 2 + 3 * cols;
+
+        let (col_widths, use_truncate): (Vec<usize>, bool) = if available == 0
+            || mode == TableMode::Natural
+        {
+            (natural.clone(), false)
+        } else if mode == TableMode::Truncate {
+            let overflow = natural.iter().sum::<usize>() + border_overhead > available;
+            (natural.clone(), overflow)
+        } else {
+            // SqueezeWrap: shrink largest column first until we fit or hit min.
+            let mut widths = natural.clone();
+            loop {
+                let total: usize = widths.iter().sum::<usize>() + border_overhead;
+                if total <= available {
+                    break;
+                }
+                let (max_idx, &max_w) = match widths
+                    .iter()
+                    .enumerate()
+                    .max_by_key(|(_, w)| *w)
+                {
+                    Some(pair) => pair,
+                    None => break,
+                };
+                if max_w <= min_col {
+                    break;
+                }
+                widths[max_idx] = (max_w - 1).max(min_col);
+            }
+            let overflow = widths.iter().sum::<usize>() + border_overhead > available;
+            (widths, overflow)
+        };
+
+        // Take table state so we can iterate without double-borrowing self.
+        let rows = std::mem::take(&mut self.table_rows);
+        let alignments = std::mem::take(&mut self.table_alignments);
+        self.table_columns = 0;
+
+        let border_style = self.theme.table_border;
+        let header_style = self.theme.table_header;
+        let cell_style = self.theme.table_cell;
+
+        // Top border.
         let top_border: String = col_widths
             .iter()
             .map(|w| "─".repeat(*w + 2))
             .collect::<Vec<_>>()
             .join("┬");
-        self.lines.push(Line::from(vec![RSpan::styled(
+        let top_line = Line::from(vec![RSpan::styled(
             format!("┌{}┐", top_border),
-            self.theme.table_border,
-        )]));
+            border_style,
+        )]);
+        self.push_table_line(top_line, use_truncate);
 
-        // Render rows
-        for (row_idx, row) in self.table_rows.iter().enumerate() {
-            let mut line_spans = vec![RSpan::styled("│ ".to_string(), self.theme.table_border)];
+        let row_count = rows.len();
+        for (row_idx, row) in rows.iter().enumerate() {
+            // Wrap each cell to its column width.
+            let wrapped_cells: Vec<Vec<Vec<RSpan<'static>>>> = row
+                .iter()
+                .enumerate()
+                .map(|(col_idx, cell)| {
+                    let width = col_widths.get(col_idx).copied().unwrap_or(3);
+                    wrap_spans_to_width(cell, width)
+                })
+                .collect();
 
-            for (col_idx, cell) in row.iter().enumerate() {
-                let cell_text: String = cell.iter().map(|s| s.content.to_string()).collect();
-                let width = col_widths.get(col_idx).copied().unwrap_or(3);
-                let align = self
-                    .table_alignments
-                    .get(col_idx)
-                    .copied()
-                    .unwrap_or(Alignment::Default);
+            let row_height = wrapped_cells
+                .iter()
+                .map(|c| c.len().max(1))
+                .max()
+                .unwrap_or(1);
 
-                let text_width = cell_text.width();
-                let pad = width.saturating_sub(text_width);
-                let padded = match align {
-                    Alignment::Center => {
-                        let left = pad / 2;
-                        let right = pad - left;
-                        format!("{}{}{}", " ".repeat(left), cell_text, " ".repeat(right))
+            let row_style = if row_idx == 0 { header_style } else { cell_style };
+
+            for visual_idx in 0..row_height {
+                let mut line_spans: Vec<RSpan<'static>> =
+                    vec![RSpan::styled("│ ".to_string(), border_style)];
+
+                for col_idx in 0..cols {
+                    let width = col_widths.get(col_idx).copied().unwrap_or(3);
+                    let align = alignments
+                        .get(col_idx)
+                        .copied()
+                        .unwrap_or(Alignment::Default);
+
+                    let empty: Vec<RSpan<'static>> = Vec::new();
+                    let cell_line: &[RSpan<'static>] = wrapped_cells
+                        .get(col_idx)
+                        .and_then(|lines| lines.get(visual_idx))
+                        .map(|v| v.as_slice())
+                        .unwrap_or(&empty);
+
+                    let cell_width: usize =
+                        cell_line.iter().map(|s| s.content.width()).sum();
+                    let pad = width.saturating_sub(cell_width);
+                    let (left_pad, right_pad) = match align {
+                        Alignment::Center => {
+                            let left = pad / 2;
+                            (left, pad - left)
+                        }
+                        Alignment::Right => (pad, 0),
+                        _ => (0, pad),
+                    };
+
+                    if left_pad > 0 {
+                        line_spans.push(RSpan::styled(" ".repeat(left_pad), row_style));
                     }
-                    Alignment::Right => format!("{}{}", " ".repeat(pad), cell_text),
-                    _ => format!("{}{}", cell_text, " ".repeat(pad)),
-                };
+                    for span in cell_line {
+                        line_spans.push(RSpan::styled(
+                            span.content.to_string(),
+                            span.style.patch(row_style),
+                        ));
+                    }
+                    if right_pad > 0 {
+                        line_spans.push(RSpan::styled(" ".repeat(right_pad), row_style));
+                    }
 
-                let style = if row_idx == 0 {
-                    self.theme.table_header
-                } else {
-                    self.theme.table_cell
-                };
+                    line_spans
+                        .push(RSpan::styled(" │ ".to_string(), border_style));
+                }
 
-                line_spans.push(RSpan::styled(padded, style));
-                line_spans.push(RSpan::styled(" │ ".to_string(), self.theme.table_border));
+                self.push_table_line(Line::from(line_spans), use_truncate);
             }
 
-            self.lines.push(Line::from(line_spans));
-
-            // Add separator after every row except the last
-            if row_idx < self.table_rows.len() - 1 {
+            // Horizontal separator between logical rows (not after the last row).
+            if row_idx < row_count - 1 {
                 let sep: String = col_widths
                     .iter()
                     .enumerate()
                     .map(|(i, w)| {
-                        // For header separator (row_idx == 0), show alignment markers
-                        // For data row separators, use plain dashes
                         if row_idx == 0 {
-                            let align = self
-                                .table_alignments
+                            let align = alignments
                                 .get(i)
                                 .copied()
                                 .unwrap_or(Alignment::Default);
@@ -668,34 +853,30 @@ impl<'a> RendererState<'a> {
                                 _ => "─".repeat(*w + 2),
                             }
                         } else {
-                            // Data row separators: plain dashes
                             "─".repeat(*w + 2)
                         }
                     })
                     .collect::<Vec<_>>()
                     .join("┼");
-                self.lines.push(Line::from(vec![RSpan::styled(
+                let sep_line = Line::from(vec![RSpan::styled(
                     format!("├{}┤", sep),
-                    self.theme.table_border,
-                )]));
+                    border_style,
+                )]);
+                self.push_table_line(sep_line, use_truncate);
             }
         }
 
-        // Render bottom border
+        // Bottom border.
         let bottom_border: String = col_widths
             .iter()
             .map(|w| "─".repeat(*w + 2))
             .collect::<Vec<_>>()
             .join("┴");
-        self.lines.push(Line::from(vec![RSpan::styled(
+        let bottom_line = Line::from(vec![RSpan::styled(
             format!("└{}┘", bottom_border),
-            self.theme.table_border,
-        )]));
-
-        // Clear table state
-        self.table_rows.clear();
-        self.table_columns = 0;
-        self.table_alignments.clear();
+            border_style,
+        )]);
+        self.push_table_line(bottom_line, use_truncate);
     }
 }
 
@@ -1280,7 +1461,7 @@ mod tests {
             &Theme::default(),
             &RenderOptions::default(),
         );
-        assert!(result.text.lines.len() >= 1);
+        assert!(!result.text.lines.is_empty());
     }
 
     #[test]
@@ -1292,6 +1473,148 @@ mod tests {
         );
         // Table renders with borders
         assert!(result.text.lines.len() >= 3);
+    }
+
+    fn render_lines_as_strings(result: &RenderedMarkdown) -> Vec<String> {
+        result
+            .text
+            .lines
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|s| s.content.to_string())
+                    .collect::<String>()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_table_squeezes_to_width() {
+        let md = "| Name | Description | Status |\n|------|-------------|--------|\n| alpha | the quick brown fox jumps over the lazy dog | ok |\n| beta | another reasonably long descriptive entry | done |";
+        let opts = RenderOptions::github().with_width(40);
+        let result = render(md, &Theme::default(), &opts);
+
+        for line in &result.text.lines {
+            let w: usize = line.spans.iter().map(|s| s.content.width()).sum();
+            assert!(
+                w <= 40,
+                "table line exceeds width 40 (got {}): {:?}",
+                w,
+                line.spans
+                    .iter()
+                    .map(|s| s.content.to_string())
+                    .collect::<String>()
+            );
+        }
+    }
+
+    #[test]
+    fn test_table_wraps_cell_contents() {
+        // Narrow viewport forces the Description column to wrap.
+        let md = "| Id | Description |\n|----|-------------|\n| 1 | the quick brown fox jumps over the lazy dog |\n| 2 | short |";
+        let opts = RenderOptions::github().with_width(30);
+        let result = render(md, &Theme::default(), &opts);
+
+        let lines = render_lines_as_strings(&result);
+
+        // Count separators (├): should be exactly one per gap between logical rows.
+        // Rows: header, data1, data2 => 2 gaps => 2 separators.
+        let sep_count = lines.iter().filter(|l| l.contains("├")).count();
+        assert_eq!(
+            sep_count, 2,
+            "expected 2 horizontal separators, got {}. Lines:\n{}",
+            sep_count,
+            lines.join("\n")
+        );
+
+        // The data row for id=1 should span multiple visual lines: find the row
+        // containing "quick" and verify the continuation line stays inside
+        // borders and does not start a new separator.
+        let quick_idx = lines
+            .iter()
+            .position(|l| l.contains("quick"))
+            .expect("wrapped row should contain 'quick'");
+        // The line after should either continue the same row (starts with "│")
+        // or be the separator. It must not be the bottom border.
+        let next = &lines[quick_idx + 1];
+        assert!(
+            next.starts_with("│") || next.starts_with("├"),
+            "line after wrapped cell should continue row or start separator, got: {:?}",
+            next
+        );
+    }
+
+    #[test]
+    fn test_table_min_column_fallback() {
+        // Extremely narrow viewport for 4 columns; should not panic.
+        let md = "| A | B | C | D |\n|---|---|---|---|\n| foo | bar | baz | qux |";
+        let opts = RenderOptions::github()
+            .with_width(10)
+            .with_min_column_width(2);
+        let result = render(md, &Theme::default(), &opts);
+        // At min widths, total still exceeds 10, so TableMode::SqueezeWrap
+        // falls through to truncation: every line must be clipped to width 10.
+        for line in &result.text.lines {
+            let w: usize = line.spans.iter().map(|s| s.content.width()).sum();
+            assert!(w <= 10, "truncated table line exceeds 10: width={}", w);
+        }
+        // At least one line should carry the truncation marker.
+        let has_marker = result
+            .text
+            .lines
+            .iter()
+            .any(|l| l.spans.iter().any(|s| s.content.contains('▶')));
+        assert!(has_marker, "expected ▶ truncation indicator somewhere");
+    }
+
+    #[test]
+    fn test_table_alignment_preserved_after_shrink() {
+        let md = "| Left | Center | Right |\n|:-----|:------:|------:|\n| aaaaaaaaaa | bbbbbbbbbb | cccccccccc |";
+        let opts = RenderOptions::github().with_width(30);
+        let result = render(md, &Theme::default(), &opts);
+        let lines = render_lines_as_strings(&result);
+
+        // Header separator (first separator after the top border) must retain
+        // alignment markers.
+        let sep = lines
+            .iter()
+            .find(|l| l.contains("├"))
+            .expect("expected header separator");
+        // Left-aligned: `:---`, Center: `:---:`, Right: `---:`
+        assert!(
+            sep.contains(":"),
+            "header separator should retain alignment markers, got: {}",
+            sep
+        );
+    }
+
+    #[test]
+    fn test_table_natural_when_width_zero() {
+        // width=0 means "unknown viewport"; table should render at natural widths.
+        let md = "| A | B |\n|---|---|\n| 1 | 2 |";
+        let opts = RenderOptions::github().with_width(0);
+        let result = render(md, &Theme::default(), &opts);
+        assert!(result.text.lines.len() >= 3);
+    }
+
+    #[test]
+    fn test_table_position_map_matches_line_count() {
+        let md = "| Id | Description |\n|----|-------------|\n| 1 | long text that will wrap across multiple lines in a narrow view |\n| 2 | ok |";
+        let opts = RenderOptions::github()
+            .with_width(24)
+            .with_position_tracking(true);
+        let result = render(md, &Theme::default(), &opts);
+
+        let position_map = result.position_map.as_ref().expect("position_map present");
+        // Invariant (see render()): position_map has one trailing empty line
+        // beyond the finalized lines.
+        assert!(
+            position_map.line_count() >= result.line_count,
+            "position_map line_count ({}) should be >= rendered line_count ({})",
+            position_map.line_count(),
+            result.line_count
+        );
     }
 
     #[test]

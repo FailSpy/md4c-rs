@@ -1,0 +1,28 @@
+[workspace]
+resolver = "2"
+members = [
+    "md4c-rs",
+    "ratatui-md",
+]
+
+[workspace.package]
+authors = ["failspy"]
+license = "MIT"
+repository = "https://github.com/failspy/md4c-rs"
+rust-version = "1.70"
+
+[workspace.dependencies]
+md4c-rs = { path = "md4c-rs", version = "0.5.2" }
+
+# External
+ratatui = "0.29"
+crossterm = "0.28"
+unicode-width = "0.2"
+unicode-segmentation = "1.11"
+syntect = { version = "5.2", default-features = false, features = ["default-fancy"] }
+criterion = "0.5"
+cc = "1.0"
+
+[profile.release]
+lto = true
+codegen-units = 1

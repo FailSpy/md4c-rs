@@ -6,8 +6,10 @@ rust-version = "1.70"
 authors = ["failspy"]
 description = "Markdown rendering for ratatui terminal UIs using MD4C"
 license = "MIT"
-repository = "https://github.com/failspy/md4c"
-keywords = ["markdown", "ratatui", "terminal", "tui", "md4c"]
+repository = "https://github.com/failspy/md4c-rs"
+homepage = "https://github.com/failspy/md4c-rs"
+documentation = "https://docs.rs/ratatui-md"
+keywords = ["ratatui", "tui", "markdown", "widget", "terminal"]
 categories = ["command-line-interface", "text-processing"]
 readme = "README.md"
 

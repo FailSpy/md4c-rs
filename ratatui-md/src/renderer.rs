@@ -727,11 +727,7 @@ impl<'a> RendererState<'a> {
                 if total <= available {
                     break;
                 }
-                let (max_idx, &max_w) = match widths
-                    .iter()
-                    .enumerate()
-                    .max_by_key(|(_, w)| *w)
-                {
+                let (max_idx, &max_w) = match widths.iter().enumerate().max_by_key(|(_, w)| *w) {
                     Some(pair) => pair,
                     None => break,
                 };
@@ -783,7 +779,11 @@ impl<'a> RendererState<'a> {
                 .max()
                 .unwrap_or(1);
 
-            let row_style = if row_idx == 0 { header_style } else { cell_style };
+            let row_style = if row_idx == 0 {
+                header_style
+            } else {
+                cell_style
+            };
 
             for visual_idx in 0..row_height {
                 let mut line_spans: Vec<RSpan<'static>> =
@@ -803,8 +803,7 @@ impl<'a> RendererState<'a> {
                         .map(|v| v.as_slice())
                         .unwrap_or(&empty);
 
-                    let cell_width: usize =
-                        cell_line.iter().map(|s| s.content.width()).sum();
+                    let cell_width: usize = cell_line.iter().map(|s| s.content.width()).sum();
                     let pad = width.saturating_sub(cell_width);
                     let (left_pad, right_pad) = match align {
                         Alignment::Center => {
@@ -828,8 +827,7 @@ impl<'a> RendererState<'a> {
                         line_spans.push(RSpan::styled(" ".repeat(right_pad), row_style));
                     }
 
-                    line_spans
-                        .push(RSpan::styled(" │ ".to_string(), border_style));
+                    line_spans.push(RSpan::styled(" │ ".to_string(), border_style));
                 }
 
                 self.push_table_line(Line::from(line_spans), use_truncate);
@@ -842,10 +840,7 @@ impl<'a> RendererState<'a> {
                     .enumerate()
                     .map(|(i, w)| {
                         if row_idx == 0 {
-                            let align = alignments
-                                .get(i)
-                                .copied()
-                                .unwrap_or(Alignment::Default);
+                            let align = alignments.get(i).copied().unwrap_or(Alignment::Default);
                             match align {
                                 Alignment::Left => format!(":{}─", "─".repeat(*w)),
                                 Alignment::Right => format!("{}─:", "─".repeat(*w)),
@@ -858,10 +853,7 @@ impl<'a> RendererState<'a> {
                     })
                     .collect::<Vec<_>>()
                     .join("┼");
-                let sep_line = Line::from(vec![RSpan::styled(
-                    format!("├{}┤", sep),
-                    border_style,
-                )]);
+                let sep_line = Line::from(vec![RSpan::styled(format!("├{}┤", sep), border_style)]);
                 self.push_table_line(sep_line, use_truncate);
             }
         }
@@ -1522,7 +1514,8 @@ mod tests {
         // Rows: header, data1, data2 => 2 gaps => 2 separators.
         let sep_count = lines.iter().filter(|l| l.contains("├")).count();
         assert_eq!(
-            sep_count, 2,
+            sep_count,
+            2,
             "expected 2 horizontal separators, got {}. Lines:\n{}",
             sep_count,
             lines.join("\n")

@@ -89,6 +89,8 @@ pub enum SpanType {
     WikiLink,
     /// Underline (extension)
     Underline,
+    /// Spoiler (extension)
+    Spoiler,
 }
 
 impl SpanType {
@@ -104,6 +106,7 @@ impl SpanType {
             sys::MD_SPAN_LATEXMATH_DISPLAY => Some(SpanType::LatexMathDisplay),
             sys::MD_SPAN_WIKILINK => Some(SpanType::WikiLink),
             sys::MD_SPAN_U => Some(SpanType::Underline),
+            sys::MD_SPAN_SPOILER => Some(SpanType::Spoiler),
             _ => None,
         }
     }
@@ -395,6 +398,8 @@ pub enum Span {
     WikiLink(WikiLinkDetail),
     /// Underline
     Underline,
+    /// Spoiler
+    Spoiler,
 }
 
 /// Helper to extract string from MD_ATTRIBUTE

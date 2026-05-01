@@ -132,6 +132,12 @@ impl ParserFlags {
         self
     }
 
+    /// Enable spoiler spans extension (`||hidden||`)
+    pub const fn spoilers(mut self) -> Self {
+        self.flags |= sys::MD_FLAG_SPOILERS;
+        self
+    }
+
     /// Get the raw flags value
     pub const fn raw(self) -> u32 {
         self.flags
@@ -484,6 +490,7 @@ unsafe fn parse_span(span_type: sys::MD_SPANTYPE, detail: *mut c_void) -> Span {
             })
         }
         sys::MD_SPAN_U => Span::Underline,
+        sys::MD_SPAN_SPOILER => Span::Spoiler,
         _ => Span::Emphasis,
     }
 }

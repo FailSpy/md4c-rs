@@ -45,6 +45,7 @@ pub const MD_SPAN_LATEXMATH: MD_SPANTYPE = 6;
 pub const MD_SPAN_LATEXMATH_DISPLAY: MD_SPANTYPE = 7;
 pub const MD_SPAN_WIKILINK: MD_SPANTYPE = 8;
 pub const MD_SPAN_U: MD_SPANTYPE = 9;
+pub const MD_SPAN_SPOILER: MD_SPANTYPE = 10;
 
 // Text types
 pub type MD_TEXTTYPE = c_uint;
@@ -80,6 +81,7 @@ pub const MD_FLAG_LATEXMATHSPANS: c_uint = 0x1000;
 pub const MD_FLAG_WIKILINKS: c_uint = 0x2000;
 pub const MD_FLAG_UNDERLINE: c_uint = 0x4000;
 pub const MD_FLAG_HARD_SOFT_BREAKS: c_uint = 0x8000;
+pub const MD_FLAG_SPOILERS: c_uint = 0x10000;
 
 // Convenience flag combinations
 pub const MD_FLAG_PERMISSIVEAUTOLINKS: c_uint = MD_FLAG_PERMISSIVEURLAUTOLINKS

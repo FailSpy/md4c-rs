@@ -179,7 +179,7 @@ impl Default for Theme {
             task_checked: Style::default().fg(Color::Green),
             table_header: Style::default().add_modifier(Modifier::BOLD),
             table_cell: Style::default(),
-            table_border: Style::default().fg(Color::DarkGray),
+            table_border: Style::default().add_modifier(Modifier::DIM),
             html_entity: Style::default().fg(Color::Yellow),
             raw_html: Style::default().fg(Color::DarkGray),
             latex_math: Style::default().fg(Color::Magenta),
@@ -304,7 +304,7 @@ impl Theme {
                 .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
             table_cell: Style::default().fg(Color::White),
-            table_border: Style::default().fg(Color::DarkGray),
+            table_border: Style::default().add_modifier(Modifier::DIM),
             html_entity: Style::default().fg(Color::LightYellow),
             raw_html: Style::default().fg(Color::Gray),
             latex_math: Style::default().fg(Color::LightMagenta),

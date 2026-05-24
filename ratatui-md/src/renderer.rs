@@ -413,6 +413,535 @@ fn wrap_spans_to_width(
     lines
 }
 
+/// One input grapheme cluster for the position-map-aware wrap. Carries
+/// the cluster text, its style (from the source span), its display width,
+/// classification flags, and the CharMapping that was already pushed into
+/// `position_map.current_line` for this cluster.
+///
+/// `wrap_clusters` (below) consumes a Vec of these and produces both the
+/// wrapped ratatui `Line`s AND a parallel `LinePosMap` per visual line so
+/// `finish_line` can swap `position_map.current_line` for K per-visual-
+/// line entries — keeping position_map shape and rendered Text shape in
+/// lock-step (Step 3d's load-bearing invariant).
+struct WrapClusterCell {
+    text: String,
+    style: Style,
+    width: usize,
+    is_ws: bool,
+    is_cjk_break: bool,
+    mapping: CharMapping,
+}
+
+/// Per-visual-line wrap result: the ratatui `Line` (with optional
+/// prefix already prepended) AND the matching `LinePosMap`.
+struct WrapVisualLine {
+    spans: Vec<RSpan<'static>>,
+    pos_map: crate::position_map::LinePosMap,
+}
+
+/// True for a "breaking" whitespace cluster — same predicate as the legacy
+/// `wrap_spans_to_width` (NBSP excluded; ASCII space + Unicode whitespace
+/// included). Centralized here so the cluster classifier and the legacy
+/// path stay in lock-step.
+fn cluster_is_whitespace(g: &str) -> bool {
+    if g.is_empty() {
+        return false;
+    }
+    if g == "\u{00A0}" {
+        return false;
+    }
+    g.chars().all(char::is_whitespace)
+}
+
+/// True when a line break is ALLOWED after this cluster even without a
+/// following whitespace — CJK ideographs, Hiragana, Katakana, Hangul.
+/// Mirrors `wrap_spans_to_width::cluster_breaks_after_for_cjk`.
+fn cluster_breaks_after_for_cjk(g: &str) -> bool {
+    if unicode_width::UnicodeWidthStr::width(g) < 2 {
+        return false;
+    }
+    if g.chars().any(|c| {
+        matches!(
+            c as u32,
+            0x200D | 0xFE00..=0xFE0F | 0xE0100..=0xE01EF
+        )
+    }) {
+        return false;
+    }
+    g.chars().any(|c| {
+        let cp = c as u32;
+        matches!(
+            cp,
+            0x3040..=0x309F
+            | 0x30A0..=0x30FF
+            | 0x3400..=0x4DBF
+            | 0x4E00..=0x9FFF
+            | 0xAC00..=0xD7AF
+            | 0xF900..=0xFAFF
+            | 0xFF00..=0xFFEF
+            | 0x20000..=0x2FFFF
+        )
+    })
+}
+
+/// Wrap a flattened cluster stream into visual lines, producing both
+/// the ratatui `Line` spans AND a parallel `LinePosMap` per visual line.
+///
+/// Semantics:
+/// - Soft wrap on whitespace; inter-word whitespace runs are collapsed
+///   to a single space, matching `wrap_spans_to_width` behavior.
+/// - Long unbreakable tokens (no whitespace, no CJK break point) HARD
+///   BREAK at the budget — every emitted visual line fits within
+///   `effective_width`. This is the load-bearing departure from the
+///   legacy "single overlong words overflow" path, the one that makes
+///   Cadenza's second-pass wrap unnecessary.
+/// - `hanging_indent_cells` whitespace cells are prepended to every
+///   continuation visual line (not the first). Each inserted cell is
+///   tagged `HardWrapIndent` in the per-line `LinePosMap` so source-mode
+///   copy will skip them; selection cell-to-anchor hit-test stays in
+///   sync with rendered geometry.
+/// - `prefix_span` (e.g., blockquote bar) is prepended to EVERY visual
+///   line (first + continuations) with the matching decorative
+///   `CharMapping`s.
+///
+/// All grapheme classification (whitespace, CJK break) is grapheme-cluster
+/// aware: a ZWJ family emoji is one cluster of measured width; a CJK
+/// ideograph is one cluster of width 2.
+fn wrap_clusters(
+    cells: Vec<WrapClusterCell>,
+    effective_width: usize,
+    hanging_indent_cells: usize,
+    prefix: Option<(RSpan<'static>, cadenza_anchor::DecorativeKind, cadenza_anchor::SourceKind)>,
+) -> Vec<WrapVisualLine> {
+    use crate::position_map::{CharMapping, LinePosMap};
+    use unicode_segmentation::UnicodeSegmentation;
+
+    // Width of the bar/prefix in render cells (must be subtracted from the
+    // caller-supplied effective_width to compute the inner budget).
+    let prefix_cells: usize = prefix
+        .as_ref()
+        .map(|(span, _, _)| span.content.graphemes(true).count())
+        .unwrap_or(0);
+
+    // Push a fully-built visual line onto `out`, prepending the optional
+    // prefix span + matching decorative CharMappings if configured.
+    let push_visual_line = |out: &mut Vec<WrapVisualLine>,
+                            body_spans: Vec<RSpan<'static>>,
+                            body_pos_map: LinePosMap| {
+        let mut spans = Vec::with_capacity(1 + body_spans.len());
+        let mut pos_map = LinePosMap::with_capacity(prefix_cells + body_pos_map.len());
+        if let Some((prefix_span, dec_kind, src_kind)) = prefix.as_ref() {
+            // Prefix decorative CharMappings first (render_offsets 0..N).
+            for i in 0..prefix_cells {
+                pos_map.push(CharMapping {
+                    render_offset: i,
+                    formatting: Vec::new(),
+                    source: None,
+                    source_kind: *src_kind,
+                    decorative: Some(*dec_kind),
+                });
+            }
+            spans.push(prefix_span.clone());
+        }
+        // Body CharMappings shifted by prefix_cells.
+        let shift = prefix_cells;
+        for mut m in body_pos_map.into_chars() {
+            m.render_offset = m.render_offset.saturating_add(shift);
+            pos_map.push(m);
+        }
+        spans.extend(body_spans);
+        out.push(WrapVisualLine { spans, pos_map });
+    };
+
+    let mut out: Vec<WrapVisualLine> = Vec::new();
+
+    if cells.is_empty() {
+        // Preserve the contract of `wrap_spans_to_width`: always return at
+        // least one (possibly empty) line.
+        push_visual_line(&mut out, Vec::new(), LinePosMap::new());
+        return out;
+    }
+
+    // Body-budget per line: inner_width on continuation lines (after the
+    // hanging indent), or `effective_width.saturating_sub(prefix_cells)`
+    // for line 0. When effective_width is too tight for the indent we
+    // gracefully degrade (indent_cells reduced) rather than loop forever.
+    let mut first_line_budget = effective_width.saturating_sub(prefix_cells);
+    if first_line_budget == 0 {
+        first_line_budget = effective_width.saturating_sub(prefix_cells).max(1);
+    }
+    let cont_budget_raw = effective_width
+        .saturating_sub(prefix_cells)
+        .saturating_sub(hanging_indent_cells);
+    let cont_indent_cells = if cont_budget_raw == 0 {
+        // Pathologically narrow viewport: drop hanging indent so wrap
+        // can still make forward progress.
+        0
+    } else {
+        hanging_indent_cells
+    };
+    let cont_budget = effective_width
+        .saturating_sub(prefix_cells)
+        .saturating_sub(cont_indent_cells)
+        .max(1);
+
+    // Greedy wrap walker. Tracks: the cluster-stream cursor, the current
+    // visual line being built (spans, pos_map, cell-width), and whether
+    // we're on the first emitted line.
+    let mut cur_spans: Vec<RSpan<'static>> = Vec::new();
+    let mut cur_pos_map = LinePosMap::new();
+    let mut cur_width = 0usize;
+    let mut cur_render_offset = 0usize;
+    let mut first_emitted = false;
+    let mut current_style: Option<Style> = None;
+    let mut current_text = String::new();
+
+    // Flush the in-progress (text, style) accumulator into cur_spans.
+    let flush_text =
+        |cur_spans: &mut Vec<RSpan<'static>>,
+         current_text: &mut String,
+         current_style: &mut Option<Style>| {
+            if !current_text.is_empty() {
+                let style = current_style.unwrap_or_default();
+                cur_spans.push(RSpan::styled(std::mem::take(current_text), style));
+                *current_style = None;
+            }
+        };
+
+    // Emit (close) the current visual line. Resets line-builder state.
+    // Pushes synthetic indent decoratives if this is a continuation line.
+    let close_line = |out: &mut Vec<WrapVisualLine>,
+                      cur_spans: &mut Vec<RSpan<'static>>,
+                      cur_pos_map: &mut LinePosMap,
+                      cur_width: &mut usize,
+                      cur_render_offset: &mut usize,
+                      current_text: &mut String,
+                      current_style: &mut Option<Style>,
+                      first_emitted: &mut bool| {
+        flush_text(cur_spans, current_text, current_style);
+        let spans = std::mem::take(cur_spans);
+        let pos_map = std::mem::take(cur_pos_map);
+        push_visual_line(out, spans, pos_map);
+        *cur_width = 0;
+        *cur_render_offset = 0;
+        *first_emitted = true;
+    };
+
+    // Start a continuation line: insert hanging-indent cells (decorative).
+    let start_continuation_indent = |cur_spans: &mut Vec<RSpan<'static>>,
+                                     cur_pos_map: &mut LinePosMap,
+                                     cur_width: &mut usize,
+                                     cur_render_offset: &mut usize| {
+        if cont_indent_cells == 0 {
+            return;
+        }
+        let indent_text: String = " ".repeat(cont_indent_cells);
+        cur_spans.push(RSpan::raw(indent_text));
+        for _ in 0..cont_indent_cells {
+            cur_pos_map.push(CharMapping {
+                render_offset: *cur_render_offset,
+                formatting: Vec::new(),
+                source: None,
+                source_kind: cadenza_anchor::SourceKind::PlainText,
+                decorative: Some(cadenza_anchor::DecorativeKind::HardWrapIndent),
+            });
+            *cur_render_offset += 1;
+        }
+        *cur_width += cont_indent_cells;
+    };
+
+    // Append one input cluster to the current visual line: extends the
+    // text accumulator with the matching style, pushes a CharMapping
+    // (copied from the input cell with updated render_offset), and
+    // bumps cur_width.
+    let push_cluster = |cur_spans: &mut Vec<RSpan<'static>>,
+                        cur_pos_map: &mut LinePosMap,
+                        cur_width: &mut usize,
+                        cur_render_offset: &mut usize,
+                        current_text: &mut String,
+                        current_style: &mut Option<Style>,
+                        cell: &WrapClusterCell| {
+        // If the style changed mid-line, flush the in-progress text
+        // accumulator so the new style starts a fresh span.
+        if let Some(s) = *current_style {
+            if s != cell.style {
+                if !current_text.is_empty() {
+                    cur_spans.push(RSpan::styled(std::mem::take(current_text), s));
+                }
+                *current_style = Some(cell.style);
+            }
+        } else {
+            *current_style = Some(cell.style);
+        }
+        current_text.push_str(&cell.text);
+        let mut mapping = cell.mapping.clone();
+        mapping.render_offset = *cur_render_offset;
+        cur_pos_map.push(mapping);
+        *cur_render_offset += 1;
+        *cur_width += cell.width;
+    };
+
+    let mut idx = 0usize;
+    while idx < cells.len() {
+        // Step 1: classify a run of whitespace clusters.
+        let ws_start = idx;
+        while idx < cells.len() && cells[idx].is_ws {
+            idx += 1;
+        }
+        if idx > ws_start {
+            // Whitespace run handling:
+            // - At very start of input (first visual line, nothing emitted
+            //   yet, cur_width == 0): preserve all leading whitespace
+            //   cells 1:1 (they're a structural indent).
+            // - Mid-line (cur_width > 0): collapse the run to a single
+            //   space cluster. Pick the first WS cluster as the
+            //   "representative" for the CharMapping.
+            // - After a wrap break (cur_width == 0, lines already
+            //   emitted): drop the WS run entirely.
+            let budget = if !first_emitted {
+                first_line_budget
+            } else {
+                cont_budget
+            };
+            if !first_emitted && cur_width == 0 {
+                // Leading whitespace: preserve cluster-for-cluster, but
+                // never exceed the budget.
+                for c in &cells[ws_start..idx] {
+                    if cur_width + c.width > budget {
+                        break;
+                    }
+                    push_cluster(
+                        &mut cur_spans,
+                        &mut cur_pos_map,
+                        &mut cur_width,
+                        &mut cur_render_offset,
+                        &mut current_text,
+                        &mut current_style,
+                        c,
+                    );
+                }
+            } else if cur_width > 0 && cur_width < budget {
+                // Inter-word collapse: emit a single space using the
+                // first WS cluster's CharMapping as the representative.
+                let rep = &cells[ws_start];
+                let mut synthetic = WrapClusterCell {
+                    text: " ".to_string(),
+                    style: rep.style,
+                    width: 1,
+                    is_ws: true,
+                    is_cjk_break: false,
+                    mapping: rep.mapping.clone(),
+                };
+                synthetic.mapping.render_offset = 0; // overwritten by push_cluster
+                push_cluster(
+                    &mut cur_spans,
+                    &mut cur_pos_map,
+                    &mut cur_width,
+                    &mut cur_render_offset,
+                    &mut current_text,
+                    &mut current_style,
+                    &synthetic,
+                );
+            }
+            // else: drop the run.
+        }
+
+        if idx >= cells.len() {
+            break;
+        }
+
+        // Step 2: gather a "word" — run of non-whitespace clusters,
+        // breaking after a CJK-break-eligible cluster so CJK content
+        // wraps.
+        let word_start = idx;
+        while idx < cells.len() && !cells[idx].is_ws {
+            idx += 1;
+            if idx < cells.len() && cells[idx - 1].is_cjk_break {
+                break;
+            }
+        }
+        let word_slice = &cells[word_start..idx];
+        if word_slice.is_empty() {
+            continue;
+        }
+        let word_width: usize = word_slice.iter().map(|c| c.width).sum();
+
+        // Step 3: decide if the word fits on the current line, must wrap
+        // before, or must hard-break (when the word itself exceeds budget).
+        let budget = if !first_emitted {
+            first_line_budget
+        } else {
+            cont_budget
+        };
+
+        if cur_width + word_width <= budget {
+            // Whole word fits. Append.
+            for c in word_slice {
+                push_cluster(
+                    &mut cur_spans,
+                    &mut cur_pos_map,
+                    &mut cur_width,
+                    &mut cur_render_offset,
+                    &mut current_text,
+                    &mut current_style,
+                    c,
+                );
+            }
+        } else if cur_width > 0 {
+            // Soft-wrap: close current line, then start a continuation,
+            // then retry placing the word.
+            close_line(
+                &mut out,
+                &mut cur_spans,
+                &mut cur_pos_map,
+                &mut cur_width,
+                &mut cur_render_offset,
+                &mut current_text,
+                &mut current_style,
+                &mut first_emitted,
+            );
+            start_continuation_indent(
+                &mut cur_spans,
+                &mut cur_pos_map,
+                &mut cur_width,
+                &mut cur_render_offset,
+            );
+            // Re-classify on the same word — fall through by NOT
+            // advancing idx; the next loop iteration will re-process it.
+            idx = word_start;
+            continue;
+        } else {
+            // Hard-break: cur_width == 0 (already on a fresh line) and
+            // the word doesn't fit. Walk cluster-by-cluster, closing the
+            // line whenever the next cluster would exceed budget. Always
+            // emit at least one cluster per line so we make forward
+            // progress (handles e.g. inner_width=1 + 2-wide CJK by
+            // overflowing that single cell — never dropping).
+            //
+            // Exception: NBSP (U+00A0) is a "stickiness" glyph — the
+            // cluster pair around it MUST NOT be split (typographic
+            // convention from `wrap_grapheme_integrity::nbsp_is_non_breaking`).
+            // If the word contains an NBSP we overflow rather than
+            // break, preserving the non-breaking pair at the cost of an
+            // over-budget visual line for that word.
+            let has_nbsp = word_slice.iter().any(|c| c.text == "\u{00A0}");
+            if has_nbsp {
+                for c in word_slice {
+                    push_cluster(
+                        &mut cur_spans,
+                        &mut cur_pos_map,
+                        &mut cur_width,
+                        &mut cur_render_offset,
+                        &mut current_text,
+                        &mut current_style,
+                        c,
+                    );
+                }
+            } else {
+                let mut wi = word_start;
+                while wi < idx {
+                    let c = &cells[wi];
+                    let budget = if !first_emitted {
+                        first_line_budget
+                    } else {
+                        cont_budget
+                    };
+                    if cur_width + c.width > budget && cur_width > 0 {
+                        close_line(
+                            &mut out,
+                            &mut cur_spans,
+                            &mut cur_pos_map,
+                            &mut cur_width,
+                            &mut cur_render_offset,
+                            &mut current_text,
+                            &mut current_style,
+                            &mut first_emitted,
+                        );
+                        start_continuation_indent(
+                            &mut cur_spans,
+                            &mut cur_pos_map,
+                            &mut cur_width,
+                            &mut cur_render_offset,
+                        );
+                        continue; // retry this cluster on the fresh line
+                    }
+                    push_cluster(
+                        &mut cur_spans,
+                        &mut cur_pos_map,
+                        &mut cur_width,
+                        &mut cur_render_offset,
+                        &mut current_text,
+                        &mut current_style,
+                        c,
+                    );
+                    wi += 1;
+                }
+            }
+        }
+    }
+
+    // Final flush: emit the in-progress visual line (or the empty line
+    // if no content was generated, to honor the "always return one line"
+    // contract).
+    flush_text(&mut cur_spans, &mut current_text, &mut current_style);
+    if !cur_spans.is_empty() || !cur_pos_map.is_empty() || out.is_empty() {
+        push_visual_line(&mut out, cur_spans, cur_pos_map);
+    }
+
+    out
+}
+
+/// Build the `WrapClusterCell`s for `finish_line` by zipping the current
+/// `RSpan` content (which is what gets wrapped) with the matching
+/// `CharMapping`s from `position_map.current_line` (which were pushed in
+/// lock-step as text was emitted). The two streams share the same
+/// grapheme-cluster ordering by construction (`push_text_position_mappings`
+/// and `push_decorative_position_mappings` push one mapping per cluster
+/// emitted into `current_spans`).
+fn build_wrap_cells(
+    spans: &[RSpan<'static>],
+    line_pos_map: crate::position_map::LinePosMap,
+) -> Vec<WrapClusterCell> {
+    use unicode_segmentation::UnicodeSegmentation;
+
+    let mappings = line_pos_map.into_chars();
+    let mut mi = 0usize;
+    let mut out: Vec<WrapClusterCell> = Vec::new();
+
+    for span in spans {
+        let style = span.style;
+        for g in span.content.graphemes(true) {
+            let mapping = if mi < mappings.len() {
+                mappings[mi].clone()
+            } else {
+                // Defensive: span/pos_map drift. Synthesize a plain
+                // mapping so wrap can still proceed; the source span will
+                // be None and delimiter-walk falls back at extract time.
+                CharMapping {
+                    render_offset: 0,
+                    formatting: Vec::new(),
+                    source: None,
+                    source_kind: cadenza_anchor::SourceKind::PlainText,
+                    decorative: None,
+                }
+            };
+            mi += 1;
+            let width = unicode_width::UnicodeWidthStr::width(g);
+            let is_ws = cluster_is_whitespace(g);
+            let is_cjk = cluster_breaks_after_for_cjk(g);
+            out.push(WrapClusterCell {
+                text: g.to_string(),
+                style,
+                width,
+                is_ws,
+                is_cjk_break: is_cjk,
+                mapping,
+            });
+        }
+    }
+    out
+}
+
 /// Clip a line to `max_width` display cells, appending a `▶` truncation
 /// marker when clipping occurs. Preserves the style of the last visible span
 /// for the marker.
@@ -780,14 +1309,96 @@ impl<'a> RendererState<'a> {
         if !spans.is_empty() || self.pending_newline {
             // Apply word wrapping if width is set and we're not in a code block
             if self.options.width > 0 && !self.in_code_block {
-                let wrapped = self.wrap_spans(spans, prefix.clone());
-                for line in wrapped {
-                    self.lines.push(line);
+                // Step 3d: position-map-aware wrap. Build per-cluster
+                // cells from the current spans + (when track_positions is
+                // on) the in-progress position_map line; wrap into K
+                // visual lines with hanging-indent on continuations,
+                // hard-break on unbreakable tokens, and (when
+                // track_positions is on) per-visual-line `LinePosMap`s
+                // so line_count(pm) == line_count(text). Always-on so
+                // markdown_block.rs:147's second-pass wrap becomes
+                // unnecessary regardless of whether the caller enabled
+                // position tracking.
+                let current_pos_line = if self.options.track_positions {
+                    self.position_map
+                        .current_line_mut()
+                        .map(std::mem::take)
+                        .unwrap_or_default()
+                } else {
+                    crate::position_map::LinePosMap::new()
+                };
+                let cells = build_wrap_cells(&spans, current_pos_line);
+
+                // Hanging-indent budget: the total display width of the
+                // leading `ListBullet` decoratives (so list-item
+                // continuations align under the body, not the bullet).
+                // When track_positions is off, decoratives are empty —
+                // detect leading list-bullet via the FIRST span (which
+                // the renderer pushes as `RSpan::styled(prefix, style)`
+                // immediately before the body text in
+                // `push_text`/`enter_block(ListItem)`).
+                let leading_bullet_cells: usize = if self.options.track_positions {
+                    cells
+                        .iter()
+                        .take_while(|c| {
+                            matches!(
+                                c.mapping.decorative,
+                                Some(cadenza_anchor::DecorativeKind::ListBullet)
+                            )
+                        })
+                        .map(|c| c.width)
+                        .sum()
+                } else {
+                    // No decorative tagging available; fall back to a
+                    // leading-whitespace heuristic mirroring Cadenza's
+                    // pre-3d second-pass wrap. Walk cells from the start
+                    // accumulating cell-width as long as the cluster is
+                    // whitespace OR a typographic bullet (`•`, `●`).
+                    let mut w = 0usize;
+                    let mut saw_bullet = false;
+                    for c in cells.iter() {
+                        if c.is_ws {
+                            w += c.width;
+                            continue;
+                        }
+                        if !saw_bullet
+                            && (c.text == "\u{2022}" || c.text == "\u{25CF}")
+                        {
+                            w += c.width;
+                            saw_bullet = true;
+                            continue;
+                        }
+                        break;
+                    }
+                    w
+                };
+
+                let prefix_triple = prefix.clone().map(|span| {
+                    (
+                        span,
+                        cadenza_anchor::DecorativeKind::BlockquoteBar,
+                        cadenza_anchor::SourceKind::PlainText,
+                    )
+                });
+                let visual_lines = wrap_clusters(
+                    cells,
+                    self.options.width,
+                    leading_bullet_cells,
+                    prefix_triple,
+                );
+
+                if self.options.track_positions {
+                    let mut new_pos_lines = Vec::with_capacity(visual_lines.len());
+                    for vl in visual_lines {
+                        self.lines.push(Line::from(vl.spans));
+                        new_pos_lines.push(vl.pos_map);
+                    }
+                    self.position_map.replace_current_with(new_pos_lines);
+                } else {
+                    for vl in visual_lines {
+                        self.lines.push(Line::from(vl.spans));
+                    }
                 }
-                // NOTE: wrap path's position_map alignment with the blockquote
-                // bar (and per-line wrap-induced indents) is deferred to
-                // Step 3b/3d (the wrap_spans rewrite). For the no-wrap path
-                // below, the bar is synced via prepend_decoratives.
             } else {
                 if let Some(p) = prefix {
                     // Sync position_map: prepend decorative entries for the
@@ -816,28 +1427,6 @@ impl<'a> RendererState<'a> {
             self.current_render_col = 0;
             self.position_map.start_line();
         }
-    }
-
-    /// Wrap spans to fit within the configured width.
-    fn wrap_spans(
-        &self,
-        spans: Vec<RSpan<'static>>,
-        prefix: Option<RSpan<'static>>,
-    ) -> Vec<Line<'static>> {
-        let max_width = self.options.width;
-        let prefix_len = prefix.as_ref().map(|p| p.content.width()).unwrap_or(0);
-        let effective_width = max_width.saturating_sub(prefix_len);
-
-        let wrapped = wrap_spans_to_width(&spans, effective_width);
-        wrapped
-            .into_iter()
-            .map(|mut line_spans| {
-                if let Some(ref p) = prefix {
-                    line_spans.insert(0, p.clone());
-                }
-                Line::from(line_spans)
-            })
-            .collect()
     }
 
     fn add_blank_line(&mut self) {
@@ -1658,9 +2247,25 @@ pub fn render(markdown: &str, theme: &Theme, options: &RenderOptions) -> Rendere
 
     let line_count = state.lines.len();
 
-    // Extract position map if tracking was enabled
+    // Extract position map if tracking was enabled. Trim trailing
+    // empty `LinePosMap`s so `position_map.line_count()` ==
+    // `text.lines.len()` — the Step 3d invariant. Each `finish_line`
+    // pre-pushes an "in-progress" empty line so subsequent
+    // `push_text_position_mappings` has somewhere to land; at end of
+    // render those trailing empties are spurious.
     let position_map = if options.track_positions {
-        Some(state.position_map)
+        let mut pm = state.position_map;
+        while pm.line_count() > line_count {
+            let last_is_empty = pm
+                .line(pm.line_count() - 1)
+                .map(|l| l.is_empty())
+                .unwrap_or(false);
+            if !last_is_empty {
+                break;
+            }
+            pm.pop_last_line();
+        }
+        Some(pm)
     } else {
         None
     };

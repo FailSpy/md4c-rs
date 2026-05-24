@@ -219,6 +219,13 @@ impl LinePosMap {
         self.chars.iter()
     }
 
+    /// Consume this line and return owned `CharMapping`s. Used by the wrap
+    /// path: the pre-wrap line's mappings are distributed across the
+    /// per-visual-line `LinePosMap`s the wrap engine builds.
+    pub fn into_chars(self) -> Vec<CharMapping> {
+        self.chars
+    }
+
     /// Prepend `count` decorative `CharMapping` entries to this line and
     /// shift all existing entries' `render_offset` up by `count`. Used by
     /// the renderer when a per-line prefix (blockquote bar, etc.) is added
@@ -296,6 +303,27 @@ impl PositionMap {
     /// Get mutable position map for a specific line.
     pub fn line_mut(&mut self, line_idx: usize) -> Option<&mut LinePosMap> {
         self.lines.get_mut(line_idx)
+    }
+
+    /// Pop the last line from the map (used to trim trailing empties at
+    /// end of render so `line_count()` mirrors `text.lines.len()`).
+    pub fn pop_last_line(&mut self) -> Option<LinePosMap> {
+        self.lines.pop()
+    }
+
+    /// Replace the current (last) line with the given lines.
+    ///
+    /// Used by the wrap path: a single logical line that got wrapped into
+    /// K visual lines needs its position_map representation re-shaped to
+    /// match — same K, each with its own per-line `render_offset` indexing
+    /// starting at 0.
+    ///
+    /// If the map is empty (no current line), this acts as a plain extend.
+    pub fn replace_current_with(&mut self, new_lines: Vec<LinePosMap>) {
+        if !self.lines.is_empty() {
+            self.lines.pop();
+        }
+        self.lines.extend(new_lines);
     }
 
     /// Get the formatting at a specific (line, char) position.

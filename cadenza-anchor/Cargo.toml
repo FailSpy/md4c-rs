@@ -1,0 +1,12 @@
+[package]
+name = "cadenza-anchor"
+version = "0.1.0"
+edition = "2021"
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Content-anchored source mapping primitives for TUI text-selection systems. Zero-dep types + SourceMapping trait shared between renderer producers (ratatui-md, future Mermaid/Sixel) and selection consumers (Cadenza)."
+
+[lints.rust]
+unsafe_code = "forbid"

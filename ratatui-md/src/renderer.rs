@@ -231,16 +231,38 @@ pub struct HeadingInfo {
 
 /// Word-wrap a sequence of styled spans to `effective_width` cells.
 ///
+/// Grapheme-cluster aware: word boundaries fall ONLY on grapheme-cluster
+/// boundaries (never mid-ZWJ-sequence, never mid-combining-mark). Display
+/// widths use `unicode-width` per grapheme cluster, not per code point —
+/// so a CJK ideograph counts as 2 cells, a ZWJ family emoji counts as
+/// its measured width, etc.
+///
 /// Preserves per-span style. Breaks at whitespace between words. Single
-/// words longer than `effective_width` overflow their line (never dropped).
-/// Returns at least one line (possibly empty) to match the contract of
-/// higher-level wrappers.
+/// words longer than `effective_width` overflow their line (never
+/// dropped). Returns at least one line (possibly empty) to match the
+/// contract of higher-level wrappers.
 fn wrap_spans_to_width(
     spans: &[RSpan<'static>],
     effective_width: usize,
 ) -> Vec<Vec<RSpan<'static>>> {
+    use unicode_segmentation::UnicodeSegmentation;
+
     if effective_width == 0 {
         return vec![spans.to_vec()];
+    }
+
+    /// Display width of a grapheme cluster (sum of code-point widths).
+    /// Combining marks and ZWJ contribute 0; CJK ideographs contribute 2.
+    #[inline]
+    fn cluster_width(g: &str) -> usize {
+        g.width()
+    }
+
+    /// True if the cluster is whitespace-only (used as word boundary).
+    /// A cluster is whitespace iff every code point in it is whitespace.
+    #[inline]
+    fn cluster_is_whitespace(g: &str) -> bool {
+        !g.is_empty() && g.chars().all(char::is_whitespace)
     }
 
     let mut lines: Vec<Vec<RSpan<'static>>> = Vec::new();
@@ -251,43 +273,60 @@ fn wrap_spans_to_width(
         let style = span.style;
         let text = span.content.as_ref();
 
-        let mut remaining = text;
-        while !remaining.is_empty() {
-            let trimmed = remaining.trim_start();
-            let leading_space = remaining.len() - trimmed.len();
+        // Walk the span as a sequence of grapheme clusters. We assemble
+        // each "word" (run of non-whitespace clusters) and each "gap" (run
+        // of whitespace clusters) so that wrap decisions land on cluster
+        // boundaries — splitting mid-ZWJ would corrupt the rendered glyph.
+        let clusters: Vec<&str> = text.graphemes(true).collect();
+        let mut idx = 0usize;
+        while idx < clusters.len() {
+            // Eat leading whitespace clusters.
+            let ws_start = idx;
+            while idx < clusters.len() && cluster_is_whitespace(clusters[idx]) {
+                idx += 1;
+            }
+            let leading_ws_width: usize =
+                clusters[ws_start..idx].iter().map(|g| cluster_width(g)).sum();
 
-            if leading_space > 0 {
+            if leading_ws_width > 0 {
                 if current_width == 0 && lines.is_empty() && current_line.is_empty() {
                     // Preserve leading whitespace at the very start (e.g., list indent).
-                    let indent_str = " ".repeat(leading_space);
+                    let indent_str: String = clusters[ws_start..idx].concat();
                     current_line.push(RSpan::styled(indent_str, style));
-                    current_width += leading_space;
+                    current_width += leading_ws_width;
                 } else if current_width > 0 && current_width < effective_width {
+                    // Collapse run of inter-word whitespace to a single space cell.
                     current_line.push(RSpan::styled(" ".to_string(), style));
                     current_width += 1;
                 }
             }
 
-            remaining = trimmed;
-            if remaining.is_empty() {
+            if idx >= clusters.len() {
                 break;
             }
 
-            let word_end = remaining
-                .find(char::is_whitespace)
-                .unwrap_or(remaining.len());
-            let word = &remaining[..word_end];
-            remaining = &remaining[word_end..];
+            // Eat a "word" = run of non-whitespace clusters.
+            let word_start = idx;
+            while idx < clusters.len() && !cluster_is_whitespace(clusters[idx]) {
+                idx += 1;
+            }
+            let word_clusters = &clusters[word_start..idx];
+            if word_clusters.is_empty() {
+                continue;
+            }
+            let word_str: String = word_clusters.concat();
+            let word_width: usize = word_clusters.iter().map(|g| cluster_width(g)).sum();
 
-            if current_width + word.width() > effective_width && current_width > 0 {
+            // Wrap before pushing the word if it would overflow AND the
+            // current line has at least one word already (single overlong
+            // words still overflow their line — never dropped).
+            if current_width + word_width > effective_width && current_width > 0 {
                 lines.push(std::mem::take(&mut current_line));
                 current_width = 0;
             }
 
-            if !word.is_empty() {
-                current_line.push(RSpan::styled(word.to_string(), style));
-                current_width += word.width();
-            }
+            current_line.push(RSpan::styled(word_str, style));
+            current_width += word_width;
         }
     }
 

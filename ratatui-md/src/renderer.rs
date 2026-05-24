@@ -4,6 +4,7 @@
 
 use crate::highlight::SyntaxHighlighter;
 use crate::position_map::{CharMapping, FormatMark, PositionMap};
+use crate::privacy::PrivacyProjection;
 use crate::theme::Theme;
 use md4c::{
     parse, Alignment, Block, BlockType, CodeBlockDetail, HeadingDetail, ImageDetail, LinkDetail,
@@ -1708,15 +1709,50 @@ pub fn render_with_block(
     options: &RenderOptions,
     block_id: cadenza_anchor::BlockId,
 ) -> (RenderedMarkdown, crate::source_map::MarkdownSourceMap) {
+    render_with_block_and_privacy(markdown, theme, options, block_id, None)
+}
+
+/// Render markdown for one block, applying privacy projection BEFORE
+/// parsing so the source byte offsets in `MarkdownSourceMap` always
+/// index into the *projected* (post-redaction) source, never the raw
+/// original. This is the renderer-side half of the "source-mode copy
+/// is never a redaction-bypass channel" invariant from the plan §I.1
+/// fact 2.
+///
+/// `projection: None` → projected source equals raw source (the
+/// `PrivacyMode::Reveal` case).
+/// `projection: Some(&p)` → `p.project(markdown)` is called and the
+/// returned `Cow<str>` is what gets parsed, rendered, AND stored as the
+/// `MarkdownSourceMap`'s source. Slicing by `anchor_to_source` byte
+/// ranges always yields projected bytes, never raw `TextBlock.text`.
+///
+/// Cadenza wires its `RulesetRegistry` projection through this
+/// parameter; ratatui-md doesn't know about specific redaction rules.
+pub fn render_with_block_and_privacy(
+    markdown: &str,
+    theme: &Theme,
+    options: &RenderOptions,
+    block_id: cadenza_anchor::BlockId,
+    projection: Option<&dyn PrivacyProjection>,
+) -> (RenderedMarkdown, crate::source_map::MarkdownSourceMap) {
     let mut opts = options.clone();
     opts.track_positions = true;
     opts.syntax_highlighting = false;
-    let rendered = render(markdown, theme, &opts);
+
+    // Apply privacy projection BEFORE parsing. The renderer then
+    // produces source spans indexing into the projected string; no
+    // post-hoc re-projection of slices is possible (byte lengths would
+    // shift), and no caller can accidentally slice the raw source.
+    let projected: std::borrow::Cow<'_, str> = match projection {
+        Some(p) => p.project(markdown),
+        None => std::borrow::Cow::Borrowed(markdown),
+    };
+    let rendered = render(&projected, theme, &opts);
     let pm = rendered
         .position_map
         .clone()
         .expect("track_positions was forced on; position_map must be Some");
-    let source: std::sync::Arc<str> = std::sync::Arc::from(markdown);
+    let source: std::sync::Arc<str> = std::sync::Arc::from(projected.as_ref());
     let source_map = crate::source_map::MarkdownSourceMap::new(block_id, source, pm);
     (rendered, source_map)
 }

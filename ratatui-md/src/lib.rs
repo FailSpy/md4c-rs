@@ -112,6 +112,7 @@
 pub mod highlight;
 pub mod latex;
 pub mod position_map;
+pub mod privacy;
 pub mod renderer;
 pub mod source_map;
 pub mod theme;
@@ -121,9 +122,10 @@ pub mod widget;
 pub use highlight::SyntaxHighlighter;
 pub use latex::latex_to_unicode;
 pub use position_map::{CharMapping, FormatMark, PositionMap};
+pub use privacy::{IdentityProjection, PrivacyProjection};
 pub use renderer::{
-    render, render_default, render_with_block, HeadingInfo, LinkInfo, RenderOptions,
-    RenderedMarkdown, TableMode,
+    render, render_default, render_with_block, render_with_block_and_privacy, HeadingInfo,
+    LinkInfo, RenderOptions, RenderedMarkdown, TableMode,
 };
 pub use source_map::MarkdownSourceMap;
 pub use theme::Theme;

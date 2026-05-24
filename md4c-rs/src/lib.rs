@@ -40,7 +40,7 @@
 //! ### Parse with Custom Handler
 //!
 //! ```rust
-//! use md4c::{parse, ParserFlags, ParserHandler, Block, Span, BlockType, SpanType, TextType};
+//! use md4c::{parse, ParserFlags, ParserHandler, Block, Span, BlockType, SpanType, TextType, TextContext};
 //!
 //! struct MyHandler {
 //!     output: String,
@@ -69,7 +69,7 @@
 //!         true
 //!     }
 //!
-//!     fn text(&mut self, _text_type: TextType, text: &str) -> bool {
+//!     fn text(&mut self, _text_type: TextType, text: &str, _ctx: TextContext) -> bool {
 //!         self.output.push_str(text);
 //!         true
 //!     }
@@ -131,6 +131,7 @@ pub mod html;
 // Re-export main types at crate root
 pub use parser::{
     parse, parse_to_events, Event, ParseError, ParseResult, ParserFlags, ParserHandler,
+    TextContext,
 };
 pub use types::{
     Alignment, Block, BlockType, CodeBlockDetail, FenceChar, HeadingDetail, ImageDetail,
@@ -203,7 +204,7 @@ mod tests {
                 self.spans += 1;
                 true
             }
-            fn text(&mut self, _: TextType, _: &str) -> bool {
+            fn text(&mut self, _: TextType, _: &str, _: TextContext) -> bool {
                 self.texts += 1;
                 true
             }

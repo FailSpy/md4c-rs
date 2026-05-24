@@ -213,6 +213,114 @@ fn zwj_emoji_wrap_line_counts_match() {
     }
 }
 
+/// Regression for Claude-F1 (HIGH): the soft-wrap-and-retry branch in
+/// `wrap_clusters` looped forever for list items at narrow widths
+/// when the continuation indent left no room for the next word. The
+/// fix gates the soft-wrap branch on `word_width <= cont_body_budget`
+/// so a word that can't fit even on a fresh continuation hard-breaks
+/// instead. Trigger window: `effective_width - prefix_cells -
+/// cont_indent_cells - word_width < 0` AND `cont_indent_cells > 0`.
+#[test]
+fn list_item_at_narrow_widths_does_not_hang() {
+    let cases: &[(&str, usize)] = &[
+        ("- One two\n", 6),
+        ("- aa bb cc\n", 5),
+        ("- The quick brown fox jumps", 8),
+        ("- supercalifragilistic\n", 10),
+        ("> One two three four\n", 5),
+        ("1. First second third\n", 7),
+    ];
+    for (input, width) in cases {
+        let opts = ratatui_md::RenderOptions::github().with_width(*width);
+        let (rendered, _) = ratatui_md::render_with_block(
+            input,
+            &ratatui_md::Theme::default(),
+            &opts,
+            BLOCK,
+        );
+        let pm = rendered.position_map.expect("track_positions");
+        assert_eq!(
+            pm.line_count(),
+            rendered.text.lines.len(),
+            "input={:?} width={}: line count mismatch (pm={} text={})",
+            input,
+            width,
+            pm.line_count(),
+            rendered.text.lines.len()
+        );
+    }
+}
+
+/// Convergent (Codex-F3 LOW + Claude-F2 MED): when `track_positions`
+/// is off, the hanging-indent heuristic must use `theme.bullet_char`
+/// rather than a hard-coded `•/●` set. Without this, themes
+/// configured with `*`, `-`, `▸`, etc. lose hanging indent on list
+/// continuations.
+#[test]
+fn custom_bullet_theme_gets_hanging_indent() {
+    use unicode_width::UnicodeWidthStr;
+    let inputs = ["- One two three four five six seven\n"];
+    let bullets = ['*', '-', '\u{25B8}', '·'];
+
+    for bullet in bullets {
+        let theme = ratatui_md::Theme {
+            bullet_char: bullet,
+            ..ratatui_md::Theme::default()
+        };
+        for input in inputs.iter() {
+            // Width chosen so the body of the list item must wrap onto
+            // at least one continuation line.
+            let width = 14usize;
+            let opts = ratatui_md::RenderOptions::github().with_width(width);
+            // Use the public `render()` path — track_positions is OFF
+            // by default. This exercises the fallback heuristic.
+            let rendered = ratatui_md::render(input, &theme, &opts);
+            assert!(
+                rendered.text.lines.len() >= 2,
+                "bullet={:?} input={:?}: expected wrap to >=2 lines",
+                bullet,
+                input
+            );
+            // First line begins with `<bullet> ` rendered prefix; every
+            // continuation must begin with whitespace whose width
+            // matches the bullet prefix's display width.
+            let first_text: String = rendered.text.lines[0]
+                .spans
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect();
+            let bullet_str = bullet.to_string();
+            let bullet_w = bullet_str.width().max(1);
+            // Account for default theme.list_indent of zero at depth 1
+            // (the prefix is "<bullet> " = bullet_w + 1 cells).
+            let expected_indent = bullet_w + 1;
+            assert!(
+                first_text.starts_with(&format!("{} ", bullet)),
+                "bullet={:?}: first line should start with bullet+space, got {:?}",
+                bullet,
+                first_text
+            );
+            for (k, line) in rendered.text.lines.iter().enumerate().skip(1) {
+                let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+                if text.trim().is_empty() {
+                    continue;
+                }
+                let leading_ws: usize = text
+                    .chars()
+                    .take_while(|c| c.is_whitespace())
+                    .map(|c| c.to_string().width())
+                    .sum();
+                assert_eq!(
+                    leading_ws, expected_indent,
+                    "bullet={:?} continuation line {} expected {} cells of \
+                     hanging indent, got {} ({:?})",
+                    bullet, k, expected_indent, leading_ws, text
+                );
+            }
+        }
+    }
+}
+
 /// Every emitted visual line fits within the requested width. This is
 /// the load-bearing invariant that makes Cadenza's second-pass wrap
 /// (`wrap_preserving_leading_whitespace` at markdown_block.rs:147)
@@ -256,6 +364,68 @@ fn every_wrapped_line_fits_within_width() {
                 input,
                 display_w,
                 line_text
+            );
+        }
+    }
+}
+
+/// Regression for Codex-F1 (HIGH): on the public `render()` path,
+/// enabling BOTH `track_positions` and `syntax_highlighting` used to
+/// leave `pm.line_count() < text.lines.len()` because the syntect-
+/// highlighted code-block path bypasses `position_map.start_line()`
+/// (deferred to a future syntect-positions wiring). The fix
+/// force-disables `syntax_highlighting` whenever `track_positions` is
+/// requested, holding the invariant for callers.
+#[cfg(feature = "syntect")]
+#[test]
+fn syntax_highlighting_with_track_positions_holds_line_count() {
+    let input = "Para before.\n\n```rust\nfn main() {\n    let x = 1;\n}\n```\n\nPara after.";
+    let opts = ratatui_md::RenderOptions::github()
+        .with_width(40)
+        .with_syntax_highlighting(true)
+        .with_position_tracking(true);
+    let rendered = ratatui_md::render(input, &ratatui_md::Theme::default(), &opts);
+    let pm = rendered
+        .position_map
+        .as_ref()
+        .expect("track_positions on");
+    assert_eq!(
+        pm.line_count(),
+        rendered.text.lines.len(),
+        "render() with both flags MUST maintain line-count invariant. \
+         pm={} text={}",
+        pm.line_count(),
+        rendered.text.lines.len()
+    );
+}
+
+/// Regression for Codex-F2 (MED): at pathologically narrow widths
+/// where `effective_width <= prefix_cells`, blockquote rendering used
+/// to violate fit-to-width by prepending the bar regardless. Fix:
+/// drop the prefix on those lines (the only honest option given no
+/// body room exists).
+#[test]
+fn narrow_blockquote_does_not_overflow() {
+    use unicode_width::UnicodeWidthStr;
+    let input = "> Hello world this content wraps narrowly.";
+    for &w in &[1usize, 2, 3] {
+        let opts = ratatui_md::RenderOptions::github().with_width(w);
+        let (rendered, _) = ratatui_md::render_with_block(
+            input,
+            &ratatui_md::Theme::default(),
+            &opts,
+            BLOCK,
+        );
+        for (li, line) in rendered.text.lines.iter().enumerate() {
+            let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+            let dw = text.width();
+            assert!(
+                dw <= w,
+                "narrow blockquote width={} line {} overflowed: {} cells {:?}",
+                w,
+                li,
+                dw,
+                text
             );
         }
     }

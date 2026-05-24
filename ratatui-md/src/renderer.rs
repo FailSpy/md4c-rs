@@ -518,6 +518,22 @@ fn wrap_clusters(
 
     // Width of the bar/prefix in render cells (must be subtracted from the
     // caller-supplied effective_width to compute the inner budget).
+    // Codex-F2 MED: at pathologically narrow widths
+    // (`effective_width <= prefix_cells`), there's no body room. The
+    // honest thing is to drop the prefix on those rendered lines so the
+    // fit-to-width invariant still holds; users who set width=1 with a
+    // blockquote get content with no bar (preferable to overflow OR a
+    // panic). When the prefix is dropped, downstream `prefix_cells`-
+    // dependent computations all collapse to 0 by construction.
+    let raw_prefix_cells: usize = prefix
+        .as_ref()
+        .map(|(span, _, _)| span.content.graphemes(true).count())
+        .unwrap_or(0);
+    let prefix = if raw_prefix_cells == 0 || effective_width > raw_prefix_cells {
+        prefix
+    } else {
+        None
+    };
     let prefix_cells: usize = prefix
         .as_ref()
         .map(|(span, _, _)| span.content.graphemes(true).count())
@@ -562,28 +578,27 @@ fn wrap_clusters(
         return out;
     }
 
-    // Body-budget per line: inner_width on continuation lines (after the
-    // hanging indent), or `effective_width.saturating_sub(prefix_cells)`
-    // for line 0. When effective_width is too tight for the indent we
-    // gracefully degrade (indent_cells reduced) rather than loop forever.
-    let mut first_line_budget = effective_width.saturating_sub(prefix_cells);
-    if first_line_budget == 0 {
-        first_line_budget = effective_width.saturating_sub(prefix_cells).max(1);
-    }
-    let cont_budget_raw = effective_width
-        .saturating_sub(prefix_cells)
-        .saturating_sub(hanging_indent_cells);
-    let cont_indent_cells = if cont_budget_raw == 0 {
-        // Pathologically narrow viewport: drop hanging indent so wrap
-        // can still make forward progress.
-        0
-    } else {
+    // Per-line cell budget: the body area for ANY visual line is
+    // `effective_width - prefix_cells`. `cur_width` accumulates cells
+    // INCLUDING any hanging indent the wrap inserted, so the same
+    // `line_budget` applies to first and continuation lines.
+    //
+    // When the viewport is too tight to fit the hanging indent
+    // (`line_budget <= hanging_indent_cells`), drop the indent —
+    // continuation rows flow flush-left so we can still make forward
+    // progress at pathological widths (width=1, etc.).
+    let line_budget = effective_width.saturating_sub(prefix_cells).max(1);
+    let cont_indent_cells = if line_budget > hanging_indent_cells {
         hanging_indent_cells
+    } else {
+        0
     };
-    let cont_budget = effective_width
-        .saturating_sub(prefix_cells)
-        .saturating_sub(cont_indent_cells)
-        .max(1);
+    // Body-only budget for a continuation: cells available AFTER the
+    // hanging indent. Used to decide whether a soft-wrap-and-retry can
+    // ever fit a given word — if `word_width > cont_body_budget`, no
+    // amount of soft-wrapping helps, and the wrap MUST hard-break
+    // (the load-bearing fix for Claude-F1's infinite loop).
+    let cont_body_budget = line_budget.saturating_sub(cont_indent_cells);
 
     // Greedy wrap walker. Tracks: the cluster-stream cursor, the current
     // visual line being built (spans, pos_map, cell-width), and whether
@@ -698,11 +713,7 @@ fn wrap_clusters(
             //   "representative" for the CharMapping.
             // - After a wrap break (cur_width == 0, lines already
             //   emitted): drop the WS run entirely.
-            let budget = if !first_emitted {
-                first_line_budget
-            } else {
-                cont_budget
-            };
+            let budget = line_budget;
             if !first_emitted && cur_width == 0 {
                 // Leading whitespace: preserve cluster-for-cluster, but
                 // never exceed the budget.
@@ -768,11 +779,7 @@ fn wrap_clusters(
 
         // Step 3: decide if the word fits on the current line, must wrap
         // before, or must hard-break (when the word itself exceeds budget).
-        let budget = if !first_emitted {
-            first_line_budget
-        } else {
-            cont_budget
-        };
+        let budget = line_budget;
 
         if cur_width + word_width <= budget {
             // Whole word fits. Append.
@@ -787,9 +794,13 @@ fn wrap_clusters(
                     c,
                 );
             }
-        } else if cur_width > 0 {
+        } else if cur_width > 0 && word_width <= cont_body_budget {
             // Soft-wrap: close current line, then start a continuation,
-            // then retry placing the word.
+            // then retry placing the word. ONLY take this branch when
+            // the word actually fits in the continuation budget —
+            // otherwise the retry would re-trigger the same condition
+            // forever (Claude-F1 HIGH: list items at narrow widths
+            // hung in an infinite soft-wrap retry loop).
             close_line(
                 &mut out,
                 &mut cur_spans,
@@ -811,12 +822,16 @@ fn wrap_clusters(
             idx = word_start;
             continue;
         } else {
-            // Hard-break: cur_width == 0 (already on a fresh line) and
-            // the word doesn't fit. Walk cluster-by-cluster, closing the
-            // line whenever the next cluster would exceed budget. Always
+            // Hard-break: the word doesn't fit (even on a continuation
+            // post-indent). Walk cluster-by-cluster, closing the line
+            // whenever the next cluster would exceed budget. Always
             // emit at least one cluster per line so we make forward
             // progress (handles e.g. inner_width=1 + 2-wide CJK by
             // overflowing that single cell — never dropping).
+            //
+            // If we're mid-line (cur_width > 0) close it first so the
+            // word starts on a fresh continuation. Otherwise the
+            // hard-break loop's per-cluster close-and-retry handles it.
             //
             // Exception: NBSP (U+00A0) is a "stickiness" glyph — the
             // cluster pair around it MUST NOT be split (typographic
@@ -824,6 +839,24 @@ fn wrap_clusters(
             // If the word contains an NBSP we overflow rather than
             // break, preserving the non-breaking pair at the cost of an
             // over-budget visual line for that word.
+            if cur_width > 0 {
+                close_line(
+                    &mut out,
+                    &mut cur_spans,
+                    &mut cur_pos_map,
+                    &mut cur_width,
+                    &mut cur_render_offset,
+                    &mut current_text,
+                    &mut current_style,
+                    &mut first_emitted,
+                );
+                start_continuation_indent(
+                    &mut cur_spans,
+                    &mut cur_pos_map,
+                    &mut cur_width,
+                    &mut cur_render_offset,
+                );
+            }
             let has_nbsp = word_slice.iter().any(|c| c.text == "\u{00A0}");
             if has_nbsp {
                 for c in word_slice {
@@ -841,11 +874,7 @@ fn wrap_clusters(
                 let mut wi = word_start;
                 while wi < idx {
                     let c = &cells[wi];
-                    let budget = if !first_emitted {
-                        first_line_budget
-                    } else {
-                        cont_budget
-                    };
+                    let budget = line_budget;
                     if cur_width + c.width > budget && cur_width > 0 {
                         close_line(
                             &mut out,
@@ -1350,22 +1379,53 @@ impl<'a> RendererState<'a> {
                         .sum()
                 } else {
                     // No decorative tagging available; fall back to a
-                    // leading-whitespace heuristic mirroring Cadenza's
-                    // pre-3d second-pass wrap. Walk cells from the start
-                    // accumulating cell-width as long as the cluster is
-                    // whitespace OR a typographic bullet (`•`, `●`).
+                    // leading-whitespace heuristic that recognizes ANY
+                    // configured list/task marker as a "bullet" cluster.
+                    // Without consulting `theme.{bullet_char,
+                    // task_checked_char, task_unchecked_char}` here, a
+                    // user-configured `*` / `-` / `▸` bullet would lose
+                    // hanging indent on continuations (convergent
+                    // Codex-F3 + Claude-F2). Also recognizes the numeric
+                    // ordered-list pattern `N.` / `N. ` (e.g. "1. ", "2. ").
+                    let bullet_chars = [
+                        self.theme.bullet_char,
+                        self.theme.task_checked_char,
+                        self.theme.task_unchecked_char,
+                        '\u{2022}', // U+2022 BULLET
+                        '\u{25CF}', // U+25CF BLACK CIRCLE
+                    ];
                     let mut w = 0usize;
                     let mut saw_bullet = false;
+                    let mut consuming_ordered_number = true;
                     for c in cells.iter() {
                         if c.is_ws {
                             w += c.width;
+                            consuming_ordered_number = false;
                             continue;
                         }
+                        // Ordered-list marker: a run of ASCII digits
+                        // followed by a single '.' counts as the
+                        // bullet for hanging-indent purposes.
+                        if consuming_ordered_number && !saw_bullet {
+                            if c.text.chars().all(|ch| ch.is_ascii_digit()) {
+                                w += c.width;
+                                continue;
+                            }
+                            if c.text == "." {
+                                w += c.width;
+                                saw_bullet = true;
+                                consuming_ordered_number = false;
+                                continue;
+                            }
+                        }
+                        // Bullet glyph: any configured marker char.
                         if !saw_bullet
-                            && (c.text == "\u{2022}" || c.text == "\u{25CF}")
+                            && c.text.chars().count() == 1
+                            && c.text.chars().next().is_some_and(|ch| bullet_chars.contains(&ch))
                         {
                             w += c.width;
                             saw_bullet = true;
+                            consuming_ordered_number = false;
                             continue;
                         }
                         break;
@@ -2232,6 +2292,23 @@ impl ParserHandler for RendererState<'_> {
 /// let result = render(markdown, &Theme::default(), &RenderOptions::default());
 /// ```
 pub fn render(markdown: &str, theme: &Theme, options: &RenderOptions) -> RenderedMarkdown {
+    // Codex-F1 HIGH: position-mapping the syntect-highlighted code-block
+    // path is not yet wired (deferred to Step 3b's syntect-side parallel
+    // byte-offset return — `highlight_with_offsets` exists but isn't
+    // consumed by `enter_block`/`leave_block(Code)`). With both flags on
+    // today, highlighted code lines bypass the position-map start_line
+    // hooks, leaving `pm.line_count() < text.lines.len()`. Force-disable
+    // syntax_highlighting whenever position tracking is requested via
+    // `render()` so the public invariant holds; callers who want both
+    // must wait for the syntect-positions wiring to land.
+    let mut effective_opts;
+    let options = if options.track_positions && options.syntax_highlighting {
+        effective_opts = options.clone();
+        effective_opts.syntax_highlighting = false;
+        &effective_opts
+    } else {
+        options
+    };
     let mut state = RendererState::new(theme, options);
 
     // Initialize first line for position tracking

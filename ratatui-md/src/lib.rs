@@ -113,6 +113,7 @@ pub mod highlight;
 pub mod latex;
 pub mod position_map;
 pub mod renderer;
+pub mod source_map;
 pub mod theme;
 pub mod widget;
 
@@ -121,10 +122,18 @@ pub use highlight::SyntaxHighlighter;
 pub use latex::latex_to_unicode;
 pub use position_map::{CharMapping, FormatMark, PositionMap};
 pub use renderer::{
-    render, render_default, HeadingInfo, LinkInfo, RenderOptions, RenderedMarkdown, TableMode,
+    render, render_default, render_with_block, HeadingInfo, LinkInfo, RenderOptions,
+    RenderedMarkdown, TableMode,
 };
+pub use source_map::MarkdownSourceMap;
 pub use theme::Theme;
 pub use widget::{Markdown, MarkdownSpan, MarkdownView, MarkdownViewWidget};
+
+// Re-export selection-anchor types for downstream consumers
+pub use cadenza_anchor::{
+    Anchor, BlockId, DecorativeKind, LogicalGrapheme, LogicalLine, SourceKind, SourceMapping,
+    SourceSpan, SurfaceId,
+};
 
 // Re-export md4c types that users might need
 pub use md4c::ParserFlags;

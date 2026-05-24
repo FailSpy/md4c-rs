@@ -406,6 +406,17 @@ struct RendererState<'a> {
     formatting_stack: Vec<FormatMark>,
     position_map: PositionMap,
     current_render_col: usize,
+    /// Byte offset in the input source for the *current text run* being
+    /// pushed via push_text. Set by `ParserHandler::text` from
+    /// `TextContext::source_offset`. `None` when MD4C delivered the run
+    /// from a scratch buffer (entity decode, normalization). Per-grapheme
+    /// spans within the run are derived from this base offset + the
+    /// grapheme's byte offset inside the run.
+    current_source_offset: Option<u32>,
+    /// Semantic role of the current text run. Stack-managed by
+    /// enter_block/leave_block/enter_span/leave_span. Defaults to
+    /// PlainText when the stack is empty.
+    source_kind_stack: Vec<cadenza_anchor::SourceKind>,
 }
 
 impl<'a> RendererState<'a> {
@@ -453,7 +464,17 @@ impl<'a> RendererState<'a> {
             formatting_stack: Vec::new(),
             position_map: PositionMap::new(),
             current_render_col: 0,
+            current_source_offset: None,
+            source_kind_stack: Vec::new(),
         }
+    }
+
+    #[inline]
+    fn current_source_kind(&self) -> cadenza_anchor::SourceKind {
+        self.source_kind_stack
+            .last()
+            .copied()
+            .unwrap_or(cadenza_anchor::SourceKind::PlainText)
     }
 
     fn current_style(&self) -> Style {
@@ -474,8 +495,6 @@ impl<'a> RendererState<'a> {
     }
 
     fn push_text(&mut self, text: &str) {
-        use unicode_segmentation::UnicodeSegmentation;
-
         if text.is_empty() {
             return;
         }
@@ -497,15 +516,21 @@ impl<'a> RendererState<'a> {
             self.needs_list_prefix = false;
             let prefix = self.get_list_prefix();
             if !prefix.is_empty() {
-                let prefix_len = prefix.graphemes(true).count();
                 let style = if self.list_is_ordered.last().copied().unwrap_or(false) {
                     self.theme.list_number
                 } else {
                     self.theme.list_bullet
                 };
-                self.current_spans.push(RSpan::styled(prefix, style));
-                // Advance render column past prefix (prefix has no formatting stack)
-                self.current_render_col += prefix_len;
+                // Push the rendered prefix span first (so render output is unchanged).
+                self.current_spans.push(RSpan::styled(prefix.clone(), style));
+                // Then push matching decorative position mappings (no source,
+                // DecorativeKind::ListBullet). push_decorative_position_mappings
+                // advances current_render_col by one per grapheme, replacing the
+                // raw `current_render_col += prefix_len` of the previous code.
+                self.push_decorative_position_mappings(
+                    &prefix,
+                    cadenza_anchor::DecorativeKind::ListBullet,
+                );
             }
         }
 
@@ -517,48 +542,110 @@ impl<'a> RendererState<'a> {
         // Handle embedded newlines - split into separate lines
         // This is especially important for code blocks where content may contain \n
         if text.contains('\n') {
+            // Track byte offset within the original `text` so each rendered
+            // line's source spans index correctly back into the input even
+            // when the renderer splits on embedded newlines.
+            let mut byte_cursor: usize = 0;
             let mut lines_iter = text.split('\n').peekable();
             while let Some(line) = lines_iter.next() {
+                let line_byte_start = byte_cursor;
                 if !line.is_empty() {
-                    // Track position for each grapheme if position tracking enabled
                     if self.options.track_positions {
-                        for _grapheme in line.graphemes(true) {
-                            if let Some(line_map) = self.position_map.current_line_mut() {
-                                line_map.push(CharMapping::new(
-                                    self.current_render_col,
-                                    self.formatting_stack.clone(),
-                                ));
-                            }
-                            self.current_render_col += 1;
-                        }
+                        self.push_text_position_mappings(line, line_byte_start);
                     }
                     self.current_spans
                         .push(RSpan::styled(line.to_string(), self.current_style()));
                 }
-                // If there's another line after this, finish the current line
+                byte_cursor += line.len();
                 if lines_iter.peek().is_some() {
+                    byte_cursor += 1; // account for the '\n' separator
                     self.finish_line();
                 }
             }
         } else {
-            // Track position for each grapheme if position tracking enabled
             if self.options.track_positions {
-                for _grapheme in text.graphemes(true) {
-                    if let Some(line_map) = self.position_map.current_line_mut() {
-                        line_map.push(CharMapping::new(
-                            self.current_render_col,
-                            self.formatting_stack.clone(),
-                        ));
-                    }
-                    self.current_render_col += 1;
-                }
+                self.push_text_position_mappings(text, 0);
             }
             self.current_spans
                 .push(RSpan::styled(text.to_string(), self.current_style()));
         }
     }
 
+    /// Push per-grapheme CharMappings for `text`, where `text_byte_start_in_run`
+    /// is the byte offset of `text` within the current MD4C text run (zero for
+    /// non-split runs; cumulative byte position for newline-split runs).
+    ///
+    /// Source spans index into the input by composing
+    /// `current_source_offset + text_byte_start_in_run + grapheme_byte_offset`.
+    /// When `current_source_offset` is `None` (scratch-buffer run), spans are
+    /// left as `None` and the consumer's delimiter-walk fallback handles
+    /// recovery.
+    fn push_text_position_mappings(&mut self, text: &str, text_byte_start_in_run: usize) {
+        use unicode_segmentation::UnicodeSegmentation;
+
+        let source_kind = self.current_source_kind();
+        let base_offset = self.current_source_offset;
+
+        for (grapheme_byte_start, grapheme) in text.grapheme_indices(true) {
+            let source = base_offset.and_then(|base| {
+                let abs_start = (base as usize)
+                    .checked_add(text_byte_start_in_run)?
+                    .checked_add(grapheme_byte_start)?;
+                let abs_end = abs_start.checked_add(grapheme.len())?;
+                if abs_start <= u32::MAX as usize && abs_end <= u32::MAX as usize {
+                    Some(cadenza_anchor::SourceSpan::new(
+                        abs_start as u32,
+                        abs_end as u32,
+                    ))
+                } else {
+                    None
+                }
+            });
+
+            if let Some(line_map) = self.position_map.current_line_mut() {
+                line_map.push(CharMapping::new_kinded(
+                    self.current_render_col,
+                    self.formatting_stack.clone(),
+                    source,
+                    source_kind,
+                    None,
+                ));
+            }
+            self.current_render_col += 1;
+        }
+    }
+
+    /// Push CharMappings for a decorative span (list bullets, blockquote bars,
+    /// heading markers, table borders, etc.). Each grapheme of `text` gets
+    /// `source = None`, `decorative = Some(kind)`. Caller is responsible for
+    /// emitting the matching `RSpan` into `current_spans`.
+    fn push_decorative_position_mappings(
+        &mut self,
+        text: &str,
+        kind: cadenza_anchor::DecorativeKind,
+    ) {
+        if !self.options.track_positions {
+            return;
+        }
+        use unicode_segmentation::UnicodeSegmentation;
+        let source_kind = self.current_source_kind();
+        for _grapheme in text.graphemes(true) {
+            if let Some(line_map) = self.position_map.current_line_mut() {
+                line_map.push(CharMapping::new_kinded(
+                    self.current_render_col,
+                    self.formatting_stack.clone(),
+                    None,
+                    source_kind,
+                    Some(kind),
+                ));
+            }
+            self.current_render_col += 1;
+        }
+    }
+
     fn finish_line(&mut self) {
+        use unicode_segmentation::UnicodeSegmentation;
+
         if self.in_table {
             return;
         }
@@ -582,8 +669,26 @@ impl<'a> RendererState<'a> {
                 for line in wrapped {
                     self.lines.push(line);
                 }
+                // NOTE: wrap path's position_map alignment with the blockquote
+                // bar (and per-line wrap-induced indents) is deferred to
+                // Step 3b/3d (the wrap_spans rewrite). For the no-wrap path
+                // below, the bar is synced via prepend_decoratives.
             } else {
                 if let Some(p) = prefix {
+                    // Sync position_map: prepend decorative entries for the
+                    // blockquote bar so flat-index grapheme lookups stay
+                    // aligned with rendered Text columns. (Strong-oracle
+                    // round-trip relies on this.)
+                    if self.options.track_positions {
+                        let prefix_grapheme_count = p.content.graphemes(true).count();
+                        if let Some(line) = self.position_map.current_line_mut() {
+                            line.prepend_decoratives(
+                                prefix_grapheme_count,
+                                cadenza_anchor::DecorativeKind::BlockquoteBar,
+                                cadenza_anchor::SourceKind::PlainText,
+                            );
+                        }
+                    }
                     spans.insert(0, p);
                 }
                 self.lines.push(Line::from(spans));
@@ -888,7 +993,11 @@ impl ParserHandler for RendererState<'_> {
                         } else {
                             self.theme.list_bullet
                         };
-                        self.current_spans.push(RSpan::styled(prefix, style));
+                        self.current_spans.push(RSpan::styled(prefix.clone(), style));
+                        self.push_decorative_position_mappings(
+                            &prefix,
+                            cadenza_anchor::DecorativeKind::ListBullet,
+                        );
                     }
                 }
             }
@@ -897,12 +1006,21 @@ impl ParserHandler for RendererState<'_> {
                 self.in_heading = Some(level);
                 self.push_style(self.theme.heading_style(level));
 
-                // Add heading prefix (optional)
-                let prefix = "#".repeat(level as usize);
+                // Render the heading prefix `## ` AND emit matching
+                // decorative position mappings so current_render_col stays
+                // in sync with the painted cells. Without the matching
+                // push_decorative_position_mappings, subsequent heading text
+                // would get a wrong render_offset relative to the rendered
+                // Text. (Claude Step-3a F13: scope-coverage fix.)
+                let prefix = format!("{} ", "#".repeat(level as usize));
                 self.current_spans.push(RSpan::styled(
-                    format!("{} ", prefix),
+                    prefix.clone(),
                     self.theme.heading_style(level),
                 ));
+                self.push_decorative_position_mappings(
+                    &prefix,
+                    cadenza_anchor::DecorativeKind::HeadingMarker,
+                );
             }
 
             Block::Quote => {
@@ -913,12 +1031,45 @@ impl ParserHandler for RendererState<'_> {
             Block::Code(CodeBlockDetail { lang, .. }) => {
                 self.in_code_block = true;
 
-                // Show language label if present
+                // Show language label if present. Sync the position_map: emit
+                // a matching CodeFenceLabel-decorated line so flat-index
+                // grapheme lookups stay aligned with rendered Text rows.
                 if !lang.is_empty() {
+                    // If the current position_map line has any entries
+                    // (real content), finish it first so the label gets its
+                    // own clean line. If it's already empty (the common
+                    // case: code block is the first content, or there's
+                    // already been a finish_line), reuse it directly to
+                    // avoid an orphan empty line that throws off the
+                    // rendered.text.lines ↔ position_map.lines alignment.
+                    let current_line_empty = if self.options.track_positions {
+                        self.position_map
+                            .current_line_mut()
+                            .map_or(true, |l| l.is_empty())
+                    } else {
+                        true
+                    };
+                    if !current_line_empty {
+                        self.finish_line();
+                    }
+
+                    let label = format!("{}:", lang);
                     self.lines.push(Line::from(vec![RSpan::styled(
-                        format!("{}:", lang),
+                        label.clone(),
                         self.theme.code_block_info,
                     )]));
+
+                    if self.options.track_positions {
+                        // Fill the current (now-empty) position_map line
+                        // with decoratives for the label, then start a
+                        // fresh line for the code content that follows.
+                        self.push_decorative_position_mappings(
+                            &label,
+                            cadenza_anchor::DecorativeKind::CodeFenceLabel,
+                        );
+                        self.current_render_col = 0;
+                        self.position_map.start_line();
+                    }
                 }
 
                 self.code_block_lang = lang;
@@ -1293,7 +1444,20 @@ impl ParserHandler for RendererState<'_> {
         true
     }
 
-    fn text(&mut self, text_type: TextType, text: &str) -> bool {
+    fn text(&mut self, text_type: TextType, text: &str, ctx: md4c::TextContext) -> bool {
+        // Source-offset propagation policy:
+        //   - For `Normal`, `Code`, `Entity`, `Html`, `LatexMath` runs MD4C
+        //     delivers from the input buffer, use ctx.source_offset directly.
+        //   - For `HardBreak`, `SoftBreak`, `NullChar`: the renderer
+        //     synthesizes glyphs (`" "`, `"\u{FFFD}"`, etc.) that are NOT in
+        //     the input at any offset. The synthetic text must be mapped as
+        //     unmapped (source_offset = None) so per-grapheme spans don't
+        //     accidentally point at the prior run's bytes (or the newline
+        //     that triggered the break). Caught by codex Step-3a F2.
+        self.current_source_offset = match text_type {
+            TextType::HardBreak | TextType::SoftBreak | TextType::NullChar => None,
+            _ => ctx.source_offset,
+        };
         match text_type {
             TextType::Normal | TextType::Code => {
                 self.push_text(text);
@@ -1400,6 +1564,47 @@ pub fn render(markdown: &str, theme: &Theme, options: &RenderOptions) -> Rendere
 /// Convenience function using default theme and options.
 pub fn render_default(markdown: &str) -> Text<'static> {
     render(markdown, &Theme::default(), &RenderOptions::default()).text
+}
+
+/// Render markdown and return both the rendered output AND a
+/// `MarkdownSourceMap` scoped to the given block id.
+///
+/// Used by Cadenza's selection engine: the returned `MarkdownSourceMap`
+/// implements `cadenza_anchor::SourceMapping` and is the load-bearing
+/// per-block primitive that powers source-mode copy. The block id is
+/// supplied by the caller (Cadenza converts from
+/// `orchestr8_projection::BlockId` at the boundary).
+///
+/// Force-enables `track_positions` regardless of the caller's setting —
+/// the source map is meaningless without it.
+///
+/// Force-DISABLES `syntax_highlighting` until Step 3b lands the
+/// syntect-side parallel byte-offset side-channel (per the plan §III.3
+/// sub-gate 3b). With highlighting on, code-block text is buffered in
+/// `push_text` and the highlighted lines are appended in `leave_block`
+/// without going through the position-tracking path — that produces a
+/// partial map whose render-column accounting is wrong on syntax-
+/// highlighted code blocks. Until 3b, callers who want a usable source
+/// map for code-heavy content must accept unhighlighted code (the
+/// rendered text is still correct; only the per-token colors are
+/// missing). Caught by codex Step-3a F3.
+pub fn render_with_block(
+    markdown: &str,
+    theme: &Theme,
+    options: &RenderOptions,
+    block_id: cadenza_anchor::BlockId,
+) -> (RenderedMarkdown, crate::source_map::MarkdownSourceMap) {
+    let mut opts = options.clone();
+    opts.track_positions = true;
+    opts.syntax_highlighting = false;
+    let rendered = render(markdown, theme, &opts);
+    let pm = rendered
+        .position_map
+        .clone()
+        .expect("track_positions was forced on; position_map must be Some");
+    let source: std::sync::Arc<str> = std::sync::Arc::from(markdown);
+    let source_map = crate::source_map::MarkdownSourceMap::new(block_id, source, pm);
+    (rendered, source_map)
 }
 
 #[cfg(test)]

@@ -68,42 +68,168 @@ fn zwj_family_emoji_not_split_across_lines() {
 }
 
 #[test]
-fn combining_mark_sequences_stay_with_base() {
-    // `e\u{301}` = lowercase e + combining acute accent = one cluster `é`.
-    // `n\u{303}` = lowercase n + combining tilde = one cluster `ñ`.
-    let input = "café français mañana — naïve, résumé, façade.";
-    let _ = assert_clusters_intact(input, 10);
-    let _ = assert_clusters_intact(input, 16);
-    let _ = assert_clusters_intact(input, 30);
+fn combining_mark_sequences_stay_with_base_decomposed() {
+    // Strict decomposed combining marks (NFD form). These are the cases
+    // the wrap engine MUST handle: a base character followed by a
+    // combining mark (U+0300..=U+036F range etc.) forms one grapheme
+    // cluster. Precomposed forms like `é` (U+00E9) are already a single
+    // code point and don't exercise the cluster-splitting risk.
+    let inputs = &[
+        // e + combining acute = é (NFD form)
+        "cafe\u{0301} francais mantana \u{2014} nai\u{0308}ve resume\u{0301}.",
+        // n + combining tilde = ñ
+        "man\u{0303}ana, sen\u{0303}or, an\u{0303}o nuevo, espan\u{0303}ol.",
+        // o + combining diaeresis + combining macron (stacked marks)
+        "Glo\u{0308}\u{0304}ck, o\u{0308}\u{0303}stranger.",
+        // Devanagari with combining vowel marks
+        "हिन्दी में",
+    ];
 
-    // Verify combining sequences survive: no orphan combining mark
-    // appears at the START of any line (which would happen if the wrap
-    // had split mid-cluster).
-    for width in [5, 8, 12, 20] {
-        let opts = RenderOptions::github().with_width(width);
-        let rendered = render(input, &Theme::default(), &opts);
-        for (i, line) in rendered.text.lines.iter().enumerate() {
-            let line_str: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
-            if let Some(first_grapheme) = line_str.graphemes(true).next() {
-                // A combining-mark code point as a standalone first
-                // cluster would indicate a mid-cluster wrap split.
-                for ch in first_grapheme.chars() {
-                    let combining_range = ch as u32;
-                    let is_combining = matches!(
-                        combining_range,
-                        0x0300..=0x036F | 0x1AB0..=0x1AFF | 0x1DC0..=0x1DFF | 0x20D0..=0x20FF | 0xFE20..=0xFE2F
-                    );
-                    if is_combining && first_grapheme.chars().count() == 1 {
-                        panic!(
-                            "width {}: line {} starts with orphan combining mark {:?} \
-                             — wrap split a grapheme cluster",
-                            width, i, first_grapheme
+    for input in inputs {
+        for width in [5, 8, 12, 16, 24] {
+            let opts = RenderOptions::github().with_width(width);
+            let rendered = render(input, &Theme::default(), &opts);
+
+            for (i, line) in rendered.text.lines.iter().enumerate() {
+                let line_str: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+                if let Some(first_grapheme) = line_str.graphemes(true).next() {
+                    // An orphan combining mark — a cluster whose FIRST
+                    // code point is in a combining-mark Unicode block —
+                    // would only appear if the wrap split mid-cluster.
+                    // Strict check: look at the FIRST code point of the
+                    // first cluster.
+                    if let Some(first_codepoint) = first_grapheme.chars().next() {
+                        let cp = first_codepoint as u32;
+                        let is_combining = matches!(
+                            cp,
+                            0x0300..=0x036F        // Combining Diacritical Marks
+                            | 0x0483..=0x0489    // Cyrillic combining
+                            | 0x0591..=0x05BD    // Hebrew points
+                            | 0x064B..=0x065F    // Arabic harakat
+                            | 0x0900..=0x0903    // Devanagari signs
+                            | 0x093A..=0x094F    // Devanagari vowel/virama
+                            | 0x1AB0..=0x1AFF    // Combining Diacritical Marks Extended
+                            | 0x1DC0..=0x1DFF    // Combining Diacritical Marks Supplement
+                            | 0x20D0..=0x20FF    // Combining Diacritical Marks for Symbols
+                            | 0xFE20..=0xFE2F    // Combining Half Marks
+                        );
+                        assert!(
+                            !is_combining,
+                            "input {:?} width {} line {}: starts with orphan combining mark \
+                             U+{:04X} (cluster {:?}) — wrap split a grapheme cluster",
+                            input, width, i, cp, first_grapheme
                         );
                     }
                 }
             }
+
+            // Stronger: re-grapheme-iterate over the joined output and
+            // count clusters. Every cluster in the input must appear in
+            // the output (modulo collapsed whitespace).
+            let joined: String = rendered
+                .text
+                .lines
+                .iter()
+                .map(|line| line.spans.iter().map(|s| s.content.as_ref()).collect::<String>())
+                .collect::<Vec<_>>()
+                .join("");
+            let input_non_ws_clusters: Vec<&str> = input
+                .graphemes(true)
+                .filter(|g| !g.chars().all(char::is_whitespace))
+                .collect();
+            let joined_non_ws_clusters: Vec<&str> = joined
+                .graphemes(true)
+                .filter(|g| !g.chars().all(char::is_whitespace))
+                .collect();
+            assert_eq!(
+                joined_non_ws_clusters, input_non_ws_clusters,
+                "input {:?} width {}: non-whitespace clusters changed under wrap",
+                input, width
+            );
         }
     }
+}
+
+#[test]
+fn nbsp_is_non_breaking() {
+    // U+00A0 NO-BREAK SPACE should NOT be a wrap break point. Wrap
+    // engines that treat all char::is_whitespace as breakable would
+    // happily split "Mr.\u{00A0}Smith" — that's a typographic defect.
+    let input = "Mr.\u{00A0}Smith and Dr.\u{00A0}Jones and Mrs.\u{00A0}Brown.";
+
+    for width in [5, 8, 10, 15] {
+        let opts = RenderOptions::github().with_width(width);
+        let rendered = render(input, &Theme::default(), &opts);
+
+        // Every "Mr.\u{00A0}Smith", "Dr.\u{00A0}Jones", "Mrs.\u{00A0}Brown"
+        // must remain joined on a single line — even if the wrap had to
+        // overflow that line.
+        let joined_lines: Vec<String> = rendered
+            .text
+            .lines
+            .iter()
+            .map(|line| line.spans.iter().map(|s| s.content.as_ref()).collect())
+            .collect();
+
+        for non_breaking in ["Mr.\u{00A0}Smith", "Dr.\u{00A0}Jones", "Mrs.\u{00A0}Brown"] {
+            assert!(
+                joined_lines.iter().any(|l| l.contains(non_breaking)),
+                "width {}: non-breaking pair {:?} was split across lines; got {:?}",
+                width, non_breaking, joined_lines
+            );
+        }
+    }
+}
+
+#[test]
+fn cjk_ideographs_wrap_between_characters() {
+    // CJK content (no ASCII whitespace) MUST wrap between ideographs.
+    // Without CJK break-point support, the whole string is one overlong
+    // "word" that overflows every line.
+    let input = "日本語の文章は普通の漢字で書かれています。";
+    let opts = RenderOptions::github().with_width(8);
+    let rendered = render(input, &Theme::default(), &opts);
+
+    // At width 8 (≈ 4 ideographs), we expect AT LEAST 2 lines.
+    assert!(
+        rendered.text.lines.len() >= 2,
+        "expected CJK content to wrap into ≥2 lines at width 8; got {} lines: {:?}",
+        rendered.text.lines.len(),
+        rendered
+            .text
+            .lines
+            .iter()
+            .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect::<String>())
+            .collect::<Vec<_>>()
+    );
+
+    // Strong: every ideograph in input MUST be present in joined output.
+    let joined: String = rendered
+        .text
+        .lines
+        .iter()
+        .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect::<String>())
+        .collect();
+    let input_ideographs: Vec<&str> = input
+        .graphemes(true)
+        .filter(|g| g.chars().any(|c| {
+            let cp = c as u32;
+            (0x4E00..=0x9FFF).contains(&cp)
+                || (0x3040..=0x30FF).contains(&cp)
+        }))
+        .collect();
+    let joined_ideographs: Vec<&str> = joined
+        .graphemes(true)
+        .filter(|g| g.chars().any(|c| {
+            let cp = c as u32;
+            (0x4E00..=0x9FFF).contains(&cp)
+                || (0x3040..=0x30FF).contains(&cp)
+        }))
+        .collect();
+    assert_eq!(
+        joined_ideographs, input_ideographs,
+        "CJK ideographs lost or reordered under wrap"
+    );
 }
 
 #[test]

@@ -258,11 +258,77 @@ fn wrap_spans_to_width(
         g.width()
     }
 
-    /// True if the cluster is whitespace-only (used as word boundary).
-    /// A cluster is whitespace iff every code point in it is whitespace.
+    /// True if the cluster is a *breaking* whitespace (a word boundary).
+    ///
+    /// Excludes NBSP (U+00A0) — it's typographically non-breaking by
+    /// design. Without this exception, `char::is_whitespace` returns
+    /// true for NBSP and the wrap engine would happily break a sentence
+    /// at "Mr.&nbsp;Smith". Plain ASCII spaces, tabs, and other Unicode
+    /// whitespace categories remain breakable.
+    ///
+    /// Note: ZWSP (U+200B) is NOT classified as whitespace by Rust's
+    /// `char::is_whitespace` predicate, so this function returns false
+    /// for it. That means ZWSP-separated words don't get a wrap break
+    /// at the moment — see the CJK ideograph break-point handling below
+    /// for the parallel case of CJK content without ASCII spaces.
     #[inline]
     fn cluster_is_whitespace(g: &str) -> bool {
-        !g.is_empty() && g.chars().all(char::is_whitespace)
+        if g.is_empty() {
+            return false;
+        }
+        // Reject NBSP-only clusters (the typographic non-breaking space).
+        if g == "\u{00A0}" {
+            return false;
+        }
+        g.chars().all(char::is_whitespace)
+    }
+
+    /// True if a line break is ALLOWED after this cluster even when no
+    /// whitespace follows — CJK ideographs, Hiragana, Katakana, Hangul
+    /// syllables, and other wide East-Asian content. Without this rule,
+    /// CJK content (which doesn't use ASCII whitespace) would render as
+    /// one giant overlong word that overflows every line.
+    ///
+    /// This is a deliberate simplification of UAX-14: we treat any
+    /// non-Latin wide-width cluster as a potential break point. Strict
+    /// UAX-14 has more nuanced "Closing Punctuation" / "Non-Starter"
+    /// rules; this approximation is close enough for terminal rendering
+    /// and matches what tmux/iTerm do.
+    #[inline]
+    fn cluster_breaks_after_for_cjk(g: &str) -> bool {
+        // East-Asian-wide check via unicode-width: any cluster of display
+        // width 2+ that is not pure ASCII / Latin is a candidate.
+        if g.width() < 2 {
+            return false;
+        }
+        // Exclude clusters whose only wide-ness comes from emoji modifiers
+        // (we still want emoji sequences to stay glued). Emoji clusters
+        // typically include ZWJ joiners or variation selectors.
+        if g.chars().any(|c| {
+            matches!(
+                c as u32,
+                // ZWJ + variation selector ranges → emoji-flavored cluster
+                0x200D | 0xFE00..=0xFE0F | 0xE0100..=0xE01EF
+            )
+        }) {
+            return false;
+        }
+        // Heuristic: at least one code point lives in a CJK/East-Asian
+        // ideographic, kana, or Hangul block.
+        g.chars().any(|c| {
+            let cp = c as u32;
+            matches!(
+                cp,
+                0x3040..=0x309F  // Hiragana
+                | 0x30A0..=0x30FF  // Katakana
+                | 0x3400..=0x4DBF  // CJK Unified Ideographs Extension A
+                | 0x4E00..=0x9FFF  // CJK Unified Ideographs
+                | 0xAC00..=0xD7AF  // Hangul Syllables
+                | 0xF900..=0xFAFF  // CJK Compatibility Ideographs
+                | 0xFF00..=0xFFEF  // Halfwidth/Fullwidth Forms
+                | 0x20000..=0x2FFFF // CJK Extensions B–F
+            )
+        })
     }
 
     let mut lines: Vec<Vec<RSpan<'static>>> = Vec::new();
@@ -305,10 +371,19 @@ fn wrap_spans_to_width(
                 break;
             }
 
-            // Eat a "word" = run of non-whitespace clusters.
+            // Eat a "word" = run of non-whitespace clusters, BUT split on
+            // CJK-ideograph break-points so CJK content (which doesn't use
+            // ASCII whitespace) can wrap. The break is taken AFTER a CJK
+            // cluster — analogous to "space after" semantics.
             let word_start = idx;
             while idx < clusters.len() && !cluster_is_whitespace(clusters[idx]) {
                 idx += 1;
+                if idx < clusters.len()
+                    && cluster_breaks_after_for_cjk(clusters[idx - 1])
+                {
+                    // End the "word" after a CJK break-eligible cluster.
+                    break;
+                }
             }
             let word_clusters = &clusters[word_start..idx];
             if word_clusters.is_empty() {

@@ -36,6 +36,33 @@ mod syntect_impl {
     use syntect::parsing::SyntaxSet;
     use syntect::util::LinesWithEndings;
 
+    /// Compute the byte range of a span-text slice within the original
+    /// `code` string via `usize` arithmetic with checked_add both ways +
+    /// `is_char_boundary` validation. Returns `None` if the text pointer
+    /// lies outside the input buffer or if address arithmetic would
+    /// overflow.
+    fn compute_offset_checked(
+        text_start: usize,
+        text_len: usize,
+        code_start: usize,
+        code_end: usize,
+        code: &str,
+    ) -> Option<(u32, u32)> {
+        let text_end = text_start.checked_add(text_len)?;
+        if text_start < code_start || text_end > code_end {
+            return None;
+        }
+        let start_rel = text_start - code_start;
+        let end_rel = text_end - code_start;
+        if start_rel > u32::MAX as usize || end_rel > u32::MAX as usize {
+            return None;
+        }
+        if !code.is_char_boundary(start_rel) || !code.is_char_boundary(end_rel) {
+            return None;
+        }
+        Some((start_rel as u32, end_rel as u32))
+    }
+
     /// Global syntax/theme sets - loaded once, reused forever
     static SYNTAX_SET: OnceLock<SyntaxSet> = OnceLock::new();
     static THEME_SET: OnceLock<ThemeSet> = OnceLock::new();
@@ -217,8 +244,16 @@ mod syntect_impl {
             // byte offsets for every (sub)slice the syntect highlighter
             // returns. LinesWithEndings yields each line WITH its trailing
             // newline (if any); we advance by line.len() per iteration.
+            //
+            // checked_add (not wrapping_add) so a `code.len()` near
+            // usize::MAX cannot smuggle a malformed range past the
+            // `text_end <= code_end` check. Mirrors the Step 2
+            // md4c-rs pointer-arithmetic safety policy.
             let code_start = code.as_ptr() as usize;
-            let code_end = code_start.wrapping_add(code.len());
+            let code_end = match code_start.checked_add(code.len()) {
+                Some(end) => end,
+                None => return Vec::new(), // pathological: address-space overflow
+            };
             let mut line_byte_offset: usize = 0;
 
             for line in LinesWithEndings::from(code) {
@@ -232,30 +267,19 @@ mod syntect_impl {
                     Vec::with_capacity(ranges.len());
 
                 for (style, text) in ranges {
-                    // Pointer arithmetic done in usize with both-way bounds
-                    // checks BEFORE any clone of `text`. If syntect returned
-                    // a slice that isn't inside `code` (shouldn't happen,
-                    // but defensive), the offset is None.
+                    // Pointer arithmetic in usize with checked_add both ways
+                    // BEFORE any clone of `text`. If syntect returned a
+                    // slice that isn't inside `code` (shouldn't happen, but
+                    // defensive), or if address arithmetic would overflow,
+                    // the offset is None.
                     let text_start = text.as_ptr() as usize;
-                    let text_end = text_start.wrapping_add(text.len());
-                    let abs_offset = if text_start >= code_start
-                        && text_end <= code_end
-                        && text_end >= text_start
-                    {
-                        let start_rel = text_start - code_start;
-                        let end_rel = text_end - code_start;
-                        if start_rel <= u32::MAX as usize
-                            && end_rel <= u32::MAX as usize
-                            && code.is_char_boundary(start_rel)
-                            && code.is_char_boundary(end_rel)
-                        {
-                            Some((start_rel as u32, end_rel as u32))
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    };
+                    let abs_offset = compute_offset_checked(
+                        text_start,
+                        text.len(),
+                        code_start,
+                        code_end,
+                        code,
+                    );
 
                     // Note: `text.trim_end_matches('\n')` may produce a
                     // shorter logical string but the absolute byte offset

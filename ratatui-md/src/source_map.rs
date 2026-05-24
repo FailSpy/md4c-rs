@@ -82,6 +82,20 @@ impl std::fmt::Debug for MarkdownSourceMap {
 
 impl MarkdownSourceMap {
     /// Build a source map for one block.
+    ///
+    /// **Privacy invariant — caller's responsibility**: when privacy
+    /// projection is in effect, `source` MUST be the *projected*
+    /// (post-redaction) string the renderer rendered from — NOT raw
+    /// `TextBlock.text`. If a caller hand-constructs a `MarkdownSourceMap`
+    /// with a non-projected source while `position_map` spans were
+    /// computed against a different string, the bypass-channel-closure
+    /// guarantee (plan §I.1 fact 2) is broken: source-mode copy would
+    /// expose raw bytes the user wasn't supposed to see.
+    ///
+    /// Prefer constructing via [`crate::render_with_block`] or
+    /// [`crate::render_with_block_and_privacy`] — those entry points
+    /// uphold the invariant by construction. Direct callers of `new`
+    /// must satisfy it manually.
     pub fn new(block_id: BlockId, source: Arc<str>, position_map: PositionMap) -> Self {
         Self {
             block_id,

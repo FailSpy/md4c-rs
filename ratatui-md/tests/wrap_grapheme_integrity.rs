@@ -245,7 +245,10 @@ fn cjk_wide_characters_count_as_two_cells() {
     // No line's display width exceeds 7 cells.
     for (i, line) in rendered.text.lines.iter().enumerate() {
         let line_str: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
-        let display_width: usize = line_str.graphemes(true).map(|g| unicode_width::UnicodeWidthStr::width(g)).sum();
+        let display_width: usize = line_str
+            .graphemes(true)
+            .map(unicode_width::UnicodeWidthStr::width)
+            .sum();
         // Allow a slight overflow only if a single word > effective_width
         // (the wrap design is "overflow-rather-than-drop").
         if display_width > 7 {

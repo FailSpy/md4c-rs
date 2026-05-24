@@ -128,9 +128,14 @@ fn email_redactor_projects_source_to_masked_form() {
 
 #[test]
 fn redacted_anchors_index_into_projected_bytes() {
-    // Anchor at any position in the rendered output, when looked up via
-    // anchor_to_source, MUST return offsets into the projected string —
-    // NEVER offsets into the raw input.
+    // The canonical "no raw bytes leak" test. Anchor at any position
+    // in the rendered output, when looked up via anchor_to_source, MUST:
+    //   1. Return offsets into the projected string (never raw input).
+    //   2. Slice to bytes that NEVER contain the redacted substring.
+    //   3. For anchors that land inside the redacted region, resolve
+    //      within the redacted token's byte range — not into adjacent
+    //      content (catches off-by-some drift bugs even when
+    //      projected.len() bounds are technically respected).
     let input = "alice@example.com is the contact.";
     let opts = RenderOptions::github();
     let redactor: &dyn PrivacyProjection = &EmailRedactor;
@@ -144,23 +149,49 @@ fn redacted_anchors_index_into_projected_bytes() {
     );
     let projected = source_map.source().to_owned();
     assert!(projected.starts_with("[EMAIL]"));
+    let email_range = 0u32..("[EMAIL]".len() as u32);
 
-    // Pick a few flat grapheme indices and verify their source spans
-    // resolve into the projected string, not the raw input.
-    for grapheme in 0..source_map.logical_lines().iter().map(|l| l.graphemes.len()).sum::<usize>() {
+    let total_graphemes: usize = source_map
+        .logical_lines()
+        .iter()
+        .map(|l| l.graphemes.len())
+        .sum();
+
+    for grapheme in 0..total_graphemes {
         let anchor = Anchor { block: BLOCK, grapheme: grapheme as u32 };
-        if let Some(span) = source_map.anchor_to_source(anchor) {
-            let s = span.start as usize;
-            let e = span.end as usize;
+        let Some(span) = source_map.anchor_to_source(anchor) else { continue };
+        let s = span.start as usize;
+        let e = span.end as usize;
+        assert!(
+            e <= projected.len(),
+            "anchor {} span {:?} exceeds projected len {}",
+            grapheme, span, projected.len()
+        );
+        // (2) Hardened bypass-channel claim: the slice MUST NEVER
+        //     contain the raw redacted token. Without this assertion,
+        //     a regression where projected source was set correctly
+        //     but per-grapheme spans drifted into a stale raw-byte
+        //     buffer would still pass the basic bounds check.
+        let slice = &projected.as_bytes()[s..e];
+        let slice_str = std::str::from_utf8(slice).unwrap_or("");
+        assert!(
+            !slice_str.contains("alice@example.com"),
+            "anchor {} span {:?} slices to {:?} which contains the redacted raw token",
+            grapheme, span, slice_str
+        );
+        // (3) Anchors covering the `[EMAIL]` rendered region must
+        //     resolve WITHIN `[EMAIL]`'s projected byte range, not
+        //     into adjacent characters. This catches off-by-some
+        //     drift in the source-span computation.
+        let starts_in_email = email_range.contains(&span.start);
+        let ends_in_email = span.end > email_range.start && span.end <= email_range.end;
+        if starts_in_email {
             assert!(
-                e <= projected.len(),
-                "anchor {} span {:?} exceeds projected len {}",
-                grapheme, span, projected.len()
+                ends_in_email,
+                "anchor {} span {:?} starts inside [EMAIL] (range {:?}) but ends outside — \
+                 redaction-byte drift",
+                grapheme, span, email_range
             );
-            // Crucial: the slice MUST be a valid sub-slice of the
-            // PROJECTED string. Slicing into the raw input would be a
-            // privacy-bypass.
-            let _ = &projected.as_bytes()[s..e]; // panics on out-of-range
         }
     }
 }
@@ -212,24 +243,60 @@ fn projection_that_inserts_markdown_chars_works_but_may_malform() {
 fn projection_preserving_length_works() {
     // A projection that asterisks-out the local part of an email
     // (same byte length) — typical "leave-shape" redaction style.
+    //
+    // Strong oracle: when redaction preserves byte length, the
+    // anchor->source byte spans MUST be byte-identical between an
+    // unredacted (identity) render and the length-preserving redacted
+    // render. This locks the invariant that byte-length-preserving
+    // redactions don't shift offsets.
     struct AsteriskRedactor;
     impl PrivacyProjection for AsteriskRedactor {
         fn project<'a>(&self, source: &'a str) -> Cow<'a, str> {
             if !source.contains('@') {
                 return Cow::Borrowed(source);
             }
-            // Replace every alphanumeric run touching `@` with `*`s of
-            // the same length so byte offsets are preserved.
-            let mut out = source.to_owned();
-            // For test simplicity, just replace "alice" with "*****" (5 chars).
-            out = out.replace("alice", "*****");
-            Cow::Owned(out)
+            Cow::Owned(source.replace("alice", "*****"))
         }
     }
     let input = "Hello alice@example.com end.";
     let opts = RenderOptions::github();
-    let p: &dyn PrivacyProjection = &AsteriskRedactor;
-    let (_rendered, source_map) =
-        render_with_block_and_privacy(input, &Theme::default(), &opts, BLOCK, Some(p));
-    assert_eq!(source_map.source(), "Hello *****@example.com end.");
+
+    let identity: &dyn PrivacyProjection = &IdentityProjection;
+    let (_, m_identity) =
+        render_with_block_and_privacy(input, &Theme::default(), &opts, BLOCK, Some(identity));
+
+    let asterisks: &dyn PrivacyProjection = &AsteriskRedactor;
+    let (_, m_asterisks) =
+        render_with_block_and_privacy(input, &Theme::default(), &opts, BLOCK, Some(asterisks));
+
+    // Sanity: stored projected sources differ in content but agree in length.
+    assert_ne!(m_identity.source(), m_asterisks.source());
+    assert_eq!(m_identity.source().len(), m_asterisks.source().len());
+    assert_eq!(m_asterisks.source(), "Hello *****@example.com end.");
+
+    // Byte-offset invariance: each grapheme's source span MUST be
+    // identical (in byte coordinates) between the two renders.
+    let total = m_identity
+        .logical_lines()
+        .iter()
+        .map(|l| l.graphemes.len())
+        .sum::<usize>();
+    let total_b = m_asterisks
+        .logical_lines()
+        .iter()
+        .map(|l| l.graphemes.len())
+        .sum::<usize>();
+    assert_eq!(total, total_b, "grapheme count must match under same-length redaction");
+
+    for grapheme in 0..total {
+        let a = Anchor { block: BLOCK, grapheme: grapheme as u32 };
+        let s1 = m_identity.anchor_to_source(a);
+        let s2 = m_asterisks.anchor_to_source(a);
+        assert_eq!(
+            s1, s2,
+            "grapheme {}: byte-length-preserving redaction shifted offsets — \
+             identity={:?}, asterisks={:?}",
+            grapheme, s1, s2
+        );
+    }
 }

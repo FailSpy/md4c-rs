@@ -1752,7 +1752,14 @@ pub fn render_with_block_and_privacy(
         .position_map
         .clone()
         .expect("track_positions was forced on; position_map must be Some");
-    let source: std::sync::Arc<str> = std::sync::Arc::from(projected.as_ref());
+    // Avoid double-allocating in the Cow::Owned case: hand the existing
+    // String straight into `Arc::from(Box<str>)` instead of slicing-and-
+    // copying via `Arc::from(&str)`. The Borrowed path still allocates
+    // once (we need an Arc<str> for the Send + Sync source map).
+    let source: std::sync::Arc<str> = match projected {
+        std::borrow::Cow::Owned(s) => std::sync::Arc::from(s.into_boxed_str()),
+        std::borrow::Cow::Borrowed(b) => std::sync::Arc::from(b),
+    };
     let source_map = crate::source_map::MarkdownSourceMap::new(block_id, source, pm);
     (rendered, source_map)
 }

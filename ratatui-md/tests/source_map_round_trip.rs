@@ -57,7 +57,12 @@ fn round_trip_content_graphemes(input: &str) -> (usize, usize, usize) {
         .text
         .lines
         .iter()
-        .map(|line| line.spans.iter().map(|s| s.content.as_ref()).collect::<String>())
+        .map(|line| {
+            line.spans
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect::<String>()
+        })
         .collect();
 
     let mut round_tripped = 0usize;
@@ -66,7 +71,10 @@ fn round_trip_content_graphemes(input: &str) -> (usize, usize, usize) {
 
     for (line_idx, logical_line) in source_map.logical_lines().iter().enumerate() {
         // Collect the rendered graphemes on this line, in order.
-        let rendered_line = rendered_lines.get(line_idx).map(String::as_str).unwrap_or("");
+        let rendered_line = rendered_lines
+            .get(line_idx)
+            .map(String::as_str)
+            .unwrap_or("");
         let rendered_graphemes: Vec<&str> = rendered_line.graphemes(true).collect();
 
         for (within_line_idx, grapheme_info) in logical_line.graphemes.iter().enumerate() {
@@ -84,7 +92,10 @@ fn round_trip_content_graphemes(input: &str) -> (usize, usize, usize) {
             }
             flat += within_line_idx as u32;
 
-            let anchor = Anchor { block: BLOCK, grapheme: flat };
+            let anchor = Anchor {
+                block: BLOCK,
+                grapheme: flat,
+            };
 
             let Some(span) = source_map.anchor_to_source(anchor) else {
                 // Scratch-buffer grapheme — not mapped, not counted as failure.
@@ -102,7 +113,11 @@ fn round_trip_content_graphemes(input: &str) -> (usize, usize, usize) {
             assert!(
                 source_end <= source.len(),
                 "input {:?}: span {:?} exceeds source.len()={} (line {} grapheme {})",
-                input, span, source.len(), line_idx, within_line_idx
+                input,
+                span,
+                source.len(),
+                line_idx,
+                within_line_idx
             );
             let source_slice = &source.as_bytes()[source_start..source_end];
 
@@ -116,8 +131,12 @@ fn round_trip_content_graphemes(input: &str) -> (usize, usize, usize) {
                 rendered_grapheme.as_bytes(),
                 "input {:?}: round-trip mismatch at line {} grapheme {} \
                  (flat {}): source[{}..{}]={:?} != rendered={:?}",
-                input, line_idx, within_line_idx, flat,
-                source_start, source_end,
+                input,
+                line_idx,
+                within_line_idx,
+                flat,
+                source_start,
+                source_end,
                 std::str::from_utf8(source_slice).unwrap_or("<bad utf8>"),
                 rendered_grapheme,
             );
@@ -138,7 +157,10 @@ fn assert_strong_round_trip(input: &str) {
     assert!(
         mapped > 0,
         "input {:?}: expected at least one mapped grapheme; got {}/{}/{}",
-        input, round_tripped, mapped, content
+        input,
+        round_tripped,
+        mapped,
+        content
     );
     assert_eq!(
         round_tripped, mapped,
@@ -225,20 +247,28 @@ fn block_id_identity_gate_enforced() {
     // → all anchor_to_* must return None (identity gate).
     let input = "Some plain text.";
     let opts = RenderOptions::github();
-    let (_rendered, source_map) =
-        render_with_block(input, &Theme::default(), &opts, BlockId(11));
+    let (_rendered, source_map) = render_with_block(input, &Theme::default(), &opts, BlockId(11));
 
-    let wrong = Anchor { block: BlockId(99), grapheme: 0 };
+    let wrong = Anchor {
+        block: BlockId(99),
+        grapheme: 0,
+    };
     assert_eq!(source_map.anchor_to_source(wrong), None);
     assert_eq!(source_map.anchor_to_source_kind(wrong), None);
     assert_eq!(source_map.anchor_to_decorative(wrong), None);
 
     // Same id, in-range anchor → at least one of the three returns Some.
-    let right = Anchor { block: BlockId(11), grapheme: 0 };
+    let right = Anchor {
+        block: BlockId(11),
+        grapheme: 0,
+    };
     let any = source_map.anchor_to_source(right).is_some()
         || source_map.anchor_to_source_kind(right).is_some()
         || source_map.anchor_to_decorative(right).is_some();
-    assert!(any, "matching block must yield Some from at least one accessor");
+    assert!(
+        any,
+        "matching block must yield Some from at least one accessor"
+    );
 }
 
 #[test]
@@ -258,8 +288,7 @@ fn list_bullets_are_tagged_decorative() {
     // tagging coverage.
     let input = "- alpha\n- beta\n";
     let opts = RenderOptions::github();
-    let (_rendered, source_map) =
-        render_with_block(input, &Theme::default(), &opts, BlockId(7));
+    let (_rendered, source_map) = render_with_block(input, &Theme::default(), &opts, BlockId(7));
 
     let mut saw_bullet = false;
     for line in source_map.logical_lines() {
@@ -275,5 +304,8 @@ fn list_bullets_are_tagged_decorative() {
             }
         }
     }
-    assert!(saw_bullet, "expected at least one ListBullet decorative cell");
+    assert!(
+        saw_bullet,
+        "expected at least one ListBullet decorative cell"
+    );
 }

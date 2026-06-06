@@ -284,10 +284,22 @@ mod tests {
 
     #[test]
     fn anchor_equality() {
-        let a = Anchor { block: BlockId(7), grapheme: 142 };
-        let b = Anchor { block: BlockId(7), grapheme: 142 };
-        let c = Anchor { block: BlockId(7), grapheme: 143 };
-        let d = Anchor { block: BlockId(8), grapheme: 142 };
+        let a = Anchor {
+            block: BlockId(7),
+            grapheme: 142,
+        };
+        let b = Anchor {
+            block: BlockId(7),
+            grapheme: 142,
+        };
+        let c = Anchor {
+            block: BlockId(7),
+            grapheme: 143,
+        };
+        let d = Anchor {
+            block: BlockId(8),
+            grapheme: 142,
+        };
         assert_eq!(a, b);
         assert_ne!(a, c);
         assert_ne!(a, d);

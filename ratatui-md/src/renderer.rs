@@ -352,8 +352,10 @@ fn wrap_spans_to_width(
             while idx < clusters.len() && cluster_is_whitespace(clusters[idx]) {
                 idx += 1;
             }
-            let leading_ws_width: usize =
-                clusters[ws_start..idx].iter().map(|g| cluster_width(g)).sum();
+            let leading_ws_width: usize = clusters[ws_start..idx]
+                .iter()
+                .map(|g| cluster_width(g))
+                .sum();
 
             if leading_ws_width > 0 {
                 if current_width == 0 && lines.is_empty() && current_line.is_empty() {
@@ -379,9 +381,7 @@ fn wrap_spans_to_width(
             let word_start = idx;
             while idx < clusters.len() && !cluster_is_whitespace(clusters[idx]) {
                 idx += 1;
-                if idx < clusters.len()
-                    && cluster_breaks_after_for_cjk(clusters[idx - 1])
-                {
+                if idx < clusters.len() && cluster_breaks_after_for_cjk(clusters[idx - 1]) {
                     // End the "word" after a CJK break-eligible cluster.
                     break;
                 }
@@ -511,7 +511,11 @@ fn wrap_clusters(
     cells: Vec<WrapClusterCell>,
     effective_width: usize,
     hanging_indent_cells: usize,
-    prefix: Option<(RSpan<'static>, cadenza_anchor::DecorativeKind, cadenza_anchor::SourceKind)>,
+    prefix: Option<(
+        RSpan<'static>,
+        cadenza_anchor::DecorativeKind,
+        cadenza_anchor::SourceKind,
+    )>,
 ) -> Vec<WrapVisualLine> {
     use crate::position_map::{CharMapping, LinePosMap};
     use unicode_segmentation::UnicodeSegmentation;
@@ -612,8 +616,7 @@ fn wrap_clusters(
     let mut current_text = String::new();
 
     // Flush the in-progress (text, style) accumulator into cur_spans.
-    let flush_text =
-        |cur_spans: &mut Vec<RSpan<'static>>,
+    let flush_text = |cur_spans: &mut Vec<RSpan<'static>>,
          current_text: &mut String,
          current_style: &mut Option<Style>| {
             if !current_text.is_empty() {
@@ -643,7 +646,8 @@ fn wrap_clusters(
     };
 
     // Start a continuation line: insert hanging-indent cells (decorative).
-    let start_continuation_indent = |cur_spans: &mut Vec<RSpan<'static>>,
+    let start_continuation_indent =
+        |cur_spans: &mut Vec<RSpan<'static>>,
                                      cur_pos_map: &mut LinePosMap,
                                      cur_width: &mut usize,
                                      cur_render_offset: &mut usize| {
@@ -1195,7 +1199,8 @@ impl<'a> RendererState<'a> {
                     self.theme.list_bullet
                 };
                 // Push the rendered prefix span first (so render output is unchanged).
-                self.current_spans.push(RSpan::styled(prefix.clone(), style));
+                self.current_spans
+                    .push(RSpan::styled(prefix.clone(), style));
                 // Then push matching decorative position mappings (no source,
                 // DecorativeKind::ListBullet). push_decorative_position_mappings
                 // advances current_render_col by one per grapheme, replacing the
@@ -1421,7 +1426,10 @@ impl<'a> RendererState<'a> {
                         // Bullet glyph: any configured marker char.
                         if !saw_bullet
                             && c.text.chars().count() == 1
-                            && c.text.chars().next().is_some_and(|ch| bullet_chars.contains(&ch))
+                            && c.text
+                                .chars()
+                                .next()
+                                .is_some_and(|ch| bullet_chars.contains(&ch))
                         {
                             w += c.width;
                             saw_bullet = true;
@@ -1757,7 +1765,8 @@ impl ParserHandler for RendererState<'_> {
                         } else {
                             self.theme.list_bullet
                         };
-                        self.current_spans.push(RSpan::styled(prefix.clone(), style));
+                        self.current_spans
+                            .push(RSpan::styled(prefix.clone(), style));
                         self.push_decorative_position_mappings(
                             &prefix,
                             cadenza_anchor::DecorativeKind::ListBullet,

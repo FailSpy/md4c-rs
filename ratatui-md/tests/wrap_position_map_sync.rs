@@ -232,12 +232,8 @@ fn list_item_at_narrow_widths_does_not_hang() {
     ];
     for (input, width) in cases {
         let opts = ratatui_md::RenderOptions::github().with_width(*width);
-        let (rendered, _) = ratatui_md::render_with_block(
-            input,
-            &ratatui_md::Theme::default(),
-            &opts,
-            BLOCK,
-        );
+        let (rendered, _) =
+            ratatui_md::render_with_block(input, &ratatui_md::Theme::default(), &opts, BLOCK);
         let pm = rendered.position_map.expect("track_positions");
         assert_eq!(
             pm.line_count(),
@@ -332,7 +328,10 @@ fn every_wrapped_line_fits_within_width() {
 
     let cases: &[(&str, usize)] = &[
         ("This is plain prose that wraps onto multiple lines.", 20),
-        ("- This list item is sufficiently long that it definitely wraps", 30),
+        (
+            "- This list item is sufficiently long that it definitely wraps",
+            30,
+        ),
         (
             "> Blockquote prose that wraps narrowly across visual rows",
             22,
@@ -346,15 +345,10 @@ fn every_wrapped_line_fits_within_width() {
 
     for (input, width) in cases {
         let opts = ratatui_md::RenderOptions::github().with_width(*width);
-        let (rendered, _) = ratatui_md::render_with_block(
-            input,
-            &ratatui_md::Theme::default(),
-            &opts,
-            BLOCK,
-        );
+        let (rendered, _) =
+            ratatui_md::render_with_block(input, &ratatui_md::Theme::default(), &opts, BLOCK);
         for (li, line) in rendered.text.lines.iter().enumerate() {
-            let line_text: String =
-                line.spans.iter().map(|s| s.content.as_ref()).collect();
+            let line_text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
             let display_w = line_text.width();
             assert!(
                 display_w <= *width,
@@ -385,10 +379,7 @@ fn syntax_highlighting_with_track_positions_holds_line_count() {
         .with_syntax_highlighting(true)
         .with_position_tracking(true);
     let rendered = ratatui_md::render(input, &ratatui_md::Theme::default(), &opts);
-    let pm = rendered
-        .position_map
-        .as_ref()
-        .expect("track_positions on");
+    let pm = rendered.position_map.as_ref().expect("track_positions on");
     assert_eq!(
         pm.line_count(),
         rendered.text.lines.len(),
@@ -410,12 +401,8 @@ fn narrow_blockquote_does_not_overflow() {
     let input = "> Hello world this content wraps narrowly.";
     for &w in &[1usize, 2, 3] {
         let opts = ratatui_md::RenderOptions::github().with_width(w);
-        let (rendered, _) = ratatui_md::render_with_block(
-            input,
-            &ratatui_md::Theme::default(),
-            &opts,
-            BLOCK,
-        );
+        let (rendered, _) =
+            ratatui_md::render_with_block(input, &ratatui_md::Theme::default(), &opts, BLOCK);
         for (li, line) in rendered.text.lines.iter().enumerate() {
             let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
             let dw = text.width();
@@ -451,12 +438,8 @@ fn wrap_preserves_source_span_byte_equality() {
 
     for (input, width) in cases {
         let opts = ratatui_md::RenderOptions::github().with_width(*width);
-        let (rendered, source_map) = ratatui_md::render_with_block(
-            input,
-            &ratatui_md::Theme::default(),
-            &opts,
-            BLOCK,
-        );
+        let (rendered, source_map) =
+            ratatui_md::render_with_block(input, &ratatui_md::Theme::default(), &opts, BLOCK);
         let source = source_map.source();
         let pm = rendered.position_map.as_ref().expect("track_positions on");
         let text: &Text<'_> = &rendered.text;
@@ -467,8 +450,7 @@ fn wrap_preserves_source_span_byte_equality() {
             // has a source span recorded, assert the source slice equals
             // the rendered grapheme text. Decoratives (no source) are
             // skipped.
-            let rendered_text: String =
-                line.spans.iter().map(|s| s.content.as_ref()).collect();
+            let rendered_text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
             for (gi, grapheme) in rendered_text.graphemes(true).enumerate() {
                 let mapping = pm_line.iter().nth(gi).unwrap_or_else(|| {
                     panic!(

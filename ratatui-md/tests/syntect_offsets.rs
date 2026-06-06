@@ -34,12 +34,17 @@ fn highlight_with_offsets_round_trips_per_span() {
             assert!(
                 e <= code.len(),
                 "line {} span {}: end {} > code.len() {}",
-                line_idx, span_idx, e, code.len()
+                line_idx,
+                span_idx,
+                e,
+                code.len()
             );
             assert!(
                 code.is_char_boundary(s) && code.is_char_boundary(e),
                 "line {} span {}: offsets {:?} not on char boundaries",
-                line_idx, span_idx, offset
+                line_idx,
+                span_idx,
+                offset
             );
 
             // The strong round-trip claim:
@@ -49,7 +54,11 @@ fn highlight_with_offsets_round_trips_per_span() {
                 span.content.as_ref(),
                 "line {} span {}: source slice does not byte-equal span content; \
                  offset={:?}, source={:?}, span={:?}",
-                line_idx, span_idx, offset, &code[s..e], span.content
+                line_idx,
+                span_idx,
+                offset,
+                &code[s..e],
+                span.content
             );
         }
     }
@@ -73,7 +82,8 @@ fn line_byte_starts_are_monotonic_and_in_range() {
         assert!(
             (line.line_byte_start as usize) <= code.len(),
             "line {} byte_start {} out of range",
-            i, line.line_byte_start
+            i,
+            line.line_byte_start
         );
         prev = line.line_byte_start;
     }

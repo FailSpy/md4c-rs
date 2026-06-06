@@ -181,14 +181,21 @@ fn very_large_input_no_overflow_no_panic() {
         input.push_str(&format!("para {} with &amp; entity\n\n", i));
     }
     let texts = collect_texts(&input, ParserFlags::commonmark());
-    assert!(!texts.is_empty(), "expected text events for non-empty input");
+    assert!(
+        !texts.is_empty(),
+        "expected text events for non-empty input"
+    );
 
     for (_, text, off) in &texts {
         if let Some(o) = off {
             let start = *o as usize;
             let end = start + text.len();
             assert!(end <= input.len(), "overflow in large input");
-            assert_eq!(&input[start..end], text.as_str(), "round-trip in large input");
+            assert_eq!(
+                &input[start..end],
+                text.as_str(),
+                "round-trip in large input"
+            );
         }
     }
 }

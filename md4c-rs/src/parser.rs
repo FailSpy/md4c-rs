@@ -169,7 +169,9 @@ pub struct TextContext {
 impl TextContext {
     /// Builder for tests and callers that synthesize TextContext directly.
     pub fn with_source_offset(offset: Option<u32>) -> Self {
-        Self { source_offset: offset }
+        Self {
+            source_offset: offset,
+        }
     }
 }
 
@@ -360,7 +362,9 @@ pub fn parse<H: ParserHandler>(
             Some(e) => e,
             None => {
                 // Pathological: size overflows usize. Conservative: no offset.
-                let tcx = TextContext { source_offset: None };
+                let tcx = TextContext {
+                    source_offset: None,
+                };
                 return if ctx.handler.text(tt, text_str, tcx) {
                     0
                 } else {
@@ -370,9 +374,7 @@ pub fn parse<H: ParserHandler>(
             }
         };
 
-        let source_offset = if text_addr >= ctx.input_start
-            && text_end <= ctx.input_end
-        {
+        let source_offset = if text_addr >= ctx.input_start && text_end <= ctx.input_end {
             let rel = text_addr - ctx.input_start;
             if rel <= u32::MAX as usize && ctx.input_str.is_char_boundary(rel) {
                 Some(rel as u32)
@@ -469,7 +471,8 @@ pub fn parse_to_events(input: &str, flags: ParserFlags) -> ParseResult<Vec<Event
         }
 
         fn text(&mut self, text_type: TextType, text: &str, ctx: TextContext) -> bool {
-            self.events.push(Event::Text(text_type, text.to_owned(), ctx));
+            self.events
+                .push(Event::Text(text_type, text.to_owned(), ctx));
             true
         }
     }

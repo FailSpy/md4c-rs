@@ -30,7 +30,8 @@ fn assert_clusters_intact(input: &str, width: usize) -> usize {
             assert!(
                 !grapheme.is_empty(),
                 "input {:?} line {} contains empty grapheme",
-                input, line_idx
+                input,
+                line_idx
             );
         }
     }
@@ -57,7 +58,12 @@ fn zwj_family_emoji_not_split_across_lines() {
         .text
         .lines
         .iter()
-        .map(|line| line.spans.iter().map(|s| s.content.as_ref()).collect::<String>())
+        .map(|line| {
+            line.spans
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect::<String>()
+        })
         .collect::<Vec<_>>()
         .join("\n");
     assert!(
@@ -130,7 +136,12 @@ fn combining_mark_sequences_stay_with_base_decomposed() {
                 .text
                 .lines
                 .iter()
-                .map(|line| line.spans.iter().map(|s| s.content.as_ref()).collect::<String>())
+                .map(|line| {
+                    line.spans
+                        .iter()
+                        .map(|s| s.content.as_ref())
+                        .collect::<String>()
+                })
                 .collect::<Vec<_>>()
                 .join("");
             let input_non_ws_clusters: Vec<&str> = input
@@ -175,7 +186,9 @@ fn nbsp_is_non_breaking() {
             assert!(
                 joined_lines.iter().any(|l| l.contains(non_breaking)),
                 "width {}: non-breaking pair {:?} was split across lines; got {:?}",
-                width, non_breaking, joined_lines
+                width,
+                non_breaking,
+                joined_lines
             );
         }
     }
@@ -199,7 +212,11 @@ fn cjk_ideographs_wrap_between_characters() {
             .text
             .lines
             .iter()
-            .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect::<String>())
+            .map(|l| l
+                .spans
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect::<String>())
             .collect::<Vec<_>>()
     );
 
@@ -208,23 +225,30 @@ fn cjk_ideographs_wrap_between_characters() {
         .text
         .lines
         .iter()
-        .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect::<String>())
+        .map(|l| {
+            l.spans
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect::<String>()
+        })
         .collect();
     let input_ideographs: Vec<&str> = input
         .graphemes(true)
-        .filter(|g| g.chars().any(|c| {
+        .filter(|g| {
+            g.chars().any(|c| {
             let cp = c as u32;
-            (0x4E00..=0x9FFF).contains(&cp)
-                || (0x3040..=0x30FF).contains(&cp)
-        }))
+                (0x4E00..=0x9FFF).contains(&cp) || (0x3040..=0x30FF).contains(&cp)
+            })
+        })
         .collect();
     let joined_ideographs: Vec<&str> = joined
         .graphemes(true)
-        .filter(|g| g.chars().any(|c| {
+        .filter(|g| {
+            g.chars().any(|c| {
             let cp = c as u32;
-            (0x4E00..=0x9FFF).contains(&cp)
-                || (0x3040..=0x30FF).contains(&cp)
-        }))
+                (0x4E00..=0x9FFF).contains(&cp) || (0x3040..=0x30FF).contains(&cp)
+            })
+        })
         .collect();
     assert_eq!(
         joined_ideographs, input_ideographs,
@@ -257,7 +281,9 @@ fn cjk_wide_characters_count_as_two_cells() {
             assert!(
                 words.len() <= 1,
                 "line {} has width {} > 7 with multiple words {:?}",
-                i, display_width, words
+                i,
+                display_width,
+                words
             );
         }
     }
@@ -277,7 +303,12 @@ fn wide_char_does_not_split() {
             .text
             .lines
             .iter()
-            .map(|line| line.spans.iter().map(|s| s.content.as_ref()).collect::<String>())
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|s| s.content.as_ref())
+                    .collect::<String>()
+            })
             .collect::<Vec<_>>()
             .join("");
         // Both occurrences of "日本語" must still appear in the joined output.
@@ -301,14 +332,20 @@ fn regional_indicator_flag_pairs_stay_together() {
         .text
         .lines
         .iter()
-        .map(|line| line.spans.iter().map(|s| s.content.as_ref()).collect::<String>())
+        .map(|line| {
+            line.spans
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect::<String>()
+        })
         .collect::<Vec<_>>()
         .join("");
     for flag in ["🇺🇸", "🇯🇵", "🇨🇦"] {
         assert!(
             full.contains(flag),
             "flag {:?} was split by wrap; got {:?}",
-            flag, full
+            flag,
+            full
         );
     }
 }
@@ -324,7 +361,12 @@ fn overlong_word_overflows_but_doesnt_drop() {
         .text
         .lines
         .iter()
-        .map(|line| line.spans.iter().map(|s| s.content.as_ref()).collect::<String>())
+        .map(|line| {
+            line.spans
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect::<String>()
+        })
         .collect::<Vec<_>>()
         .join("");
     assert!(

@@ -263,8 +263,7 @@ mod syntect_impl {
                     .unwrap_or_default();
 
                 let mut spans: Vec<Span<'static>> = Vec::with_capacity(ranges.len());
-                let mut span_offsets: Vec<Option<(u32, u32)>> =
-                    Vec::with_capacity(ranges.len());
+                let mut span_offsets: Vec<Option<(u32, u32)>> = Vec::with_capacity(ranges.len());
 
                 for (style, text) in ranges {
                     // Pointer arithmetic in usize with checked_add both ways
@@ -273,13 +272,8 @@ mod syntect_impl {
                     // defensive), or if address arithmetic would overflow,
                     // the offset is None.
                     let text_start = text.as_ptr() as usize;
-                    let abs_offset = compute_offset_checked(
-                        text_start,
-                        text.len(),
-                        code_start,
-                        code_end,
-                        code,
-                    );
+                    let abs_offset =
+                        compute_offset_checked(text_start, text.len(), code_start, code_end, code);
 
                     // Note: `text.trim_end_matches('\n')` may produce a
                     // shorter logical string but the absolute byte offset
@@ -293,8 +287,7 @@ mod syntect_impl {
                         (s, e.saturating_sub(trim_len_diff))
                     });
 
-                    let fg =
-                        Color::Rgb(style.foreground.r, style.foreground.g, style.foreground.b);
+                    let fg = Color::Rgb(style.foreground.r, style.foreground.g, style.foreground.b);
                     let mut ratatui_style = Style::default().fg(fg);
                     if style.font_style.contains(FontStyle::BOLD) {
                         ratatui_style = ratatui_style.add_modifier(Modifier::BOLD);

@@ -92,13 +92,8 @@ fn identity_projection_yields_raw_source() {
     let opts = RenderOptions::github();
     let identity: &dyn PrivacyProjection = &IdentityProjection;
 
-    let (_rendered, source_map) = render_with_block_and_privacy(
-        input,
-        &Theme::default(),
-        &opts,
-        BLOCK,
-        Some(identity),
-    );
+    let (_rendered, source_map) =
+        render_with_block_and_privacy(input, &Theme::default(), &opts, BLOCK, Some(identity));
 
     assert_eq!(source_map.source(), input);
 }
@@ -109,13 +104,8 @@ fn email_redactor_projects_source_to_masked_form() {
     let opts = RenderOptions::github();
     let redactor: &dyn PrivacyProjection = &EmailRedactor;
 
-    let (_rendered, source_map) = render_with_block_and_privacy(
-        input,
-        &Theme::default(),
-        &opts,
-        BLOCK,
-        Some(redactor),
-    );
+    let (_rendered, source_map) =
+        render_with_block_and_privacy(input, &Theme::default(), &opts, BLOCK, Some(redactor));
 
     // The source map's source is the PROJECTED string, not the raw.
     assert_eq!(source_map.source(), "Contact: [EMAIL] for details.");
@@ -140,13 +130,8 @@ fn redacted_anchors_index_into_projected_bytes() {
     let opts = RenderOptions::github();
     let redactor: &dyn PrivacyProjection = &EmailRedactor;
 
-    let (_rendered, source_map) = render_with_block_and_privacy(
-        input,
-        &Theme::default(),
-        &opts,
-        BLOCK,
-        Some(redactor),
-    );
+    let (_rendered, source_map) =
+        render_with_block_and_privacy(input, &Theme::default(), &opts, BLOCK, Some(redactor));
     let projected = source_map.source().to_owned();
     assert!(projected.starts_with("[EMAIL]"));
     let email_range = 0u32..("[EMAIL]".len() as u32);
@@ -158,14 +143,21 @@ fn redacted_anchors_index_into_projected_bytes() {
         .sum();
 
     for grapheme in 0..total_graphemes {
-        let anchor = Anchor { block: BLOCK, grapheme: grapheme as u32 };
-        let Some(span) = source_map.anchor_to_source(anchor) else { continue };
+        let anchor = Anchor {
+            block: BLOCK,
+            grapheme: grapheme as u32,
+        };
+        let Some(span) = source_map.anchor_to_source(anchor) else {
+            continue;
+        };
         let s = span.start as usize;
         let e = span.end as usize;
         assert!(
             e <= projected.len(),
             "anchor {} span {:?} exceeds projected len {}",
-            grapheme, span, projected.len()
+            grapheme,
+            span,
+            projected.len()
         );
         // (2) Hardened bypass-channel claim: the slice MUST NEVER
         //     contain the raw redacted token. Without this assertion,
@@ -177,7 +169,9 @@ fn redacted_anchors_index_into_projected_bytes() {
         assert!(
             !slice_str.contains("alice@example.com"),
             "anchor {} span {:?} slices to {:?} which contains the redacted raw token",
-            grapheme, span, slice_str
+            grapheme,
+            span,
+            slice_str
         );
         // (3) Anchors covering the `[EMAIL]` rendered region must
         //     resolve WITHIN `[EMAIL]`'s projected byte range, not
@@ -202,17 +196,15 @@ fn redactor_preserves_block_identity() {
     let opts = RenderOptions::github();
     let redactor: &dyn PrivacyProjection = &EmailRedactor;
 
-    let (_rendered, source_map) = render_with_block_and_privacy(
-        input,
-        &Theme::default(),
-        &opts,
-        BlockId(42),
-        Some(redactor),
-    );
+    let (_rendered, source_map) =
+        render_with_block_and_privacy(input, &Theme::default(), &opts, BlockId(42), Some(redactor));
 
     assert_eq!(source_map.block_id(), BlockId(42));
     // Identity gate still enforced under projection:
-    let wrong = Anchor { block: BlockId(99), grapheme: 0 };
+    let wrong = Anchor {
+        block: BlockId(99),
+        grapheme: 0,
+    };
     assert_eq!(source_map.anchor_to_source(wrong), None);
 }
 
@@ -228,13 +220,8 @@ fn projection_that_inserts_markdown_chars_works_but_may_malform() {
     let input = "[Contact: alice@example.com](mailto:alice@example.com)";
     let opts = RenderOptions::github();
     let redactor: &dyn PrivacyProjection = &EmailRedactor;
-    let (_rendered, source_map) = render_with_block_and_privacy(
-        input,
-        &Theme::default(),
-        &opts,
-        BLOCK,
-        Some(redactor),
-    );
+    let (_rendered, source_map) =
+        render_with_block_and_privacy(input, &Theme::default(), &opts, BLOCK, Some(redactor));
     assert!(source_map.source().contains("[EMAIL]"));
     assert!(!source_map.source().contains("alice@example.com"));
 }
@@ -286,10 +273,16 @@ fn projection_preserving_length_works() {
         .iter()
         .map(|l| l.graphemes.len())
         .sum::<usize>();
-    assert_eq!(total, total_b, "grapheme count must match under same-length redaction");
+    assert_eq!(
+        total, total_b,
+        "grapheme count must match under same-length redaction"
+    );
 
     for grapheme in 0..total {
-        let a = Anchor { block: BLOCK, grapheme: grapheme as u32 };
+        let a = Anchor {
+            block: BLOCK,
+            grapheme: grapheme as u32,
+        };
         let s1 = m_identity.anchor_to_source(a);
         let s2 = m_asterisks.anchor_to_source(a);
         assert_eq!(

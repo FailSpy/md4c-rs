@@ -130,8 +130,7 @@ pub mod html;
 
 // Re-export main types at crate root
 pub use parser::{
-    parse, parse_to_events, Event, ParseError, ParseResult, ParserFlags, ParserHandler,
-    TextContext,
+    parse, parse_to_events, Event, ParseError, ParseResult, ParserFlags, ParserHandler, TextContext,
 };
 pub use types::{
     Alignment, Block, BlockType, CodeBlockDetail, FenceChar, HeadingDetail, ImageDetail,

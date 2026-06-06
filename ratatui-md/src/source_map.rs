@@ -184,10 +184,7 @@ impl SourceMapping for MarkdownSourceMap {
         self.find_mapping(anchor).and_then(|m| m.decorative)
     }
 
-    fn extend_to_paired(
-        &self,
-        range: std::ops::Range<Anchor>,
-    ) -> std::ops::Range<Anchor> {
+    fn extend_to_paired(&self, range: std::ops::Range<Anchor>) -> std::ops::Range<Anchor> {
         // Step 3a stub: pass through unchanged. The full delimiter-walk
         // implementation lands when source-mode copy actually consumes this
         // (Cadenza Step 5+). The trait contract permits pass-through when
@@ -241,7 +238,10 @@ mod tests {
     #[test]
     fn block_identity_gate_returns_none_on_mismatch() {
         let m = make_test_map();
-        let wrong_block = Anchor { block: BlockId(99), grapheme: 0 };
+        let wrong_block = Anchor {
+            block: BlockId(99),
+            grapheme: 0,
+        };
         assert_eq!(m.anchor_to_source(wrong_block), None);
         assert_eq!(m.anchor_to_source_kind(wrong_block), None);
         assert_eq!(m.anchor_to_decorative(wrong_block), None);
@@ -250,7 +250,10 @@ mod tests {
     #[test]
     fn matching_block_returns_span_for_content_grapheme() {
         let m = make_test_map();
-        let a = Anchor { block: BlockId(7), grapheme: 1 };
+        let a = Anchor {
+            block: BlockId(7),
+            grapheme: 1,
+        };
         assert_eq!(m.anchor_to_source(a), Some(SourceSpan::new(1, 2)));
         assert_eq!(m.anchor_to_source_kind(a), Some(SourceKind::PlainText));
         assert_eq!(m.anchor_to_decorative(a), None);
@@ -285,7 +288,10 @@ mod tests {
             ));
         }
         let m = MarkdownSourceMap::new(BlockId(7), Arc::from("- "), pm);
-        let a = Anchor { block: BlockId(7), grapheme: 0 };
+        let a = Anchor {
+            block: BlockId(7),
+            grapheme: 0,
+        };
         assert_eq!(m.anchor_to_source(a), None);
         assert_eq!(m.anchor_to_decorative(a), Some(DecorativeKind::ListBullet));
     }
@@ -293,7 +299,10 @@ mod tests {
     #[test]
     fn out_of_range_anchor_returns_none() {
         let m = make_test_map();
-        let a = Anchor { block: BlockId(7), grapheme: 999 };
+        let a = Anchor {
+            block: BlockId(7),
+            grapheme: 999,
+        };
         assert_eq!(m.anchor_to_source(a), None);
     }
 

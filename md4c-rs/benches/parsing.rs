@@ -93,7 +93,7 @@ impl ParserHandler for NullHandler {
     fn leave_span(&mut self, _: md4c::SpanType) -> bool {
         true
     }
-    fn text(&mut self, _: md4c::TextType, _: &str) -> bool {
+    fn text(&mut self, _: md4c::TextType, _: &str, _: md4c::TextContext) -> bool {
         true
     }
 }

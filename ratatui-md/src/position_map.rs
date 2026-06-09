@@ -3,6 +3,8 @@
 //! Maps rendered character positions back to source context,
 //! enabling text selection and extraction with formatting awareness.
 
+use cadenza_anchor::{DecorativeKind, SourceKind, SourceSpan};
+
 /// Formatting mark indicating active inline formatting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FormatMark {
@@ -50,7 +52,14 @@ impl FormatMark {
     }
 }
 
-/// Maps a rendered character position to its formatting context.
+/// Maps a rendered character position to its formatting context AND
+/// (when source mapping is enabled) to its byte span in the projected
+/// source string.
+///
+/// The new source-aware fields (`source`, `source_kind`, `decorative`) are
+/// populated by the renderer when `RenderOptions::track_positions` is set.
+/// When that flag is off, the legacy constructor `new` leaves them at
+/// defaults (`None`, `SourceKind::PlainText`, `None`) — backward-compatible.
 #[derive(Debug, Clone)]
 pub struct CharMapping {
     /// Grapheme index in the rendered line (0-based).
@@ -58,14 +67,48 @@ pub struct CharMapping {
     /// Active formatting at this character position.
     /// Stack order: outermost to innermost (e.g., [Bold, Italic] for `**_text_**`).
     pub formatting: Vec<FormatMark>,
+    /// Byte span in the projected source for this grapheme. `None` for
+    /// decoratives and for grapheme runs MD4C delivered from a scratch
+    /// buffer (entity decode, normalization). Consumers walk `extend_to_paired`
+    /// to recover spans for the `None` case.
+    pub source: Option<SourceSpan>,
+    /// Semantic role of this grapheme. Used by source-mode copy to
+    /// dispatch per-construct extraction rules.
+    pub source_kind: SourceKind,
+    /// `Some(kind)` for cells the renderer emitted without source backing
+    /// (bullets, blockquote bars, table borders, heading markers, etc.).
+    /// `None` for content cells.
+    pub decorative: Option<DecorativeKind>,
 }
 
 impl CharMapping {
-    /// Create a new character mapping.
+    /// Create a new character mapping (formatting-only; no source info).
+    /// Used by callers that don't enable source-position tracking.
     pub fn new(render_offset: usize, formatting: Vec<FormatMark>) -> Self {
         Self {
             render_offset,
             formatting,
+            source: None,
+            source_kind: SourceKind::PlainText,
+            decorative: None,
+        }
+    }
+
+    /// Create a new character mapping with full source-aware metadata.
+    /// Used by callers with source-position tracking enabled.
+    pub fn new_kinded(
+        render_offset: usize,
+        formatting: Vec<FormatMark>,
+        source: Option<SourceSpan>,
+        source_kind: SourceKind,
+        decorative: Option<DecorativeKind>,
+    ) -> Self {
+        Self {
+            render_offset,
+            formatting,
+            source,
+            source_kind,
+            decorative,
         }
     }
 
@@ -102,7 +145,22 @@ impl LinePosMap {
         }
     }
 
-    /// Add a character mapping. Must be called in order (render_offset ascending).
+    /// Add a character mapping. Must be called in ascending render_offset
+    /// order — `LinePosMap::mapping_at` uses binary search and requires
+    /// the entries to be sorted.
+    ///
+    /// Two kinds of callers exist. The renderer's source-aware path
+    /// (`push_text_position_mappings` + `push_decorative_position_mappings`)
+    /// pushes consecutive indices `0, 1, 2, …`; `MarkdownSourceMap::find_mapping`
+    /// relies on this contiguity to use `nth(local)` instead of binary
+    /// searching, AND to interpret `anchor.grapheme` as a flat index across
+    /// lines. Tests and other consumers that exercise the binary-search
+    /// floor semantics may push sparse indices (0, 5, 10) — those callers
+    /// must use `mapping_at` instead of any flat-index walk.
+    ///
+    /// The decorative-exclusivity invariant (a grapheme MUST NOT carry both
+    /// `Some(source)` and `Some(decorative)`) is enforced here as a
+    /// debug_assert.
     #[inline]
     pub fn push(&mut self, mapping: CharMapping) {
         debug_assert!(
@@ -110,6 +168,12 @@ impl LinePosMap {
                 .last()
                 .map_or(true, |last| last.render_offset < mapping.render_offset),
             "CharMappings must be pushed in ascending render_offset order"
+        );
+        debug_assert!(
+            !(mapping.source.is_some() && mapping.decorative.is_some()),
+            "Decorative exclusivity violated: a grapheme MUST NOT carry \
+             both Some(source) and Some(decorative). render_offset={}",
+            mapping.render_offset,
         );
         self.chars.push(mapping);
     }
@@ -153,6 +217,43 @@ impl LinePosMap {
     /// Iterate over all character mappings.
     pub fn iter(&self) -> impl Iterator<Item = &CharMapping> {
         self.chars.iter()
+    }
+
+    /// Consume this line and return owned `CharMapping`s. Used by the wrap
+    /// path: the pre-wrap line's mappings are distributed across the
+    /// per-visual-line `LinePosMap`s the wrap engine builds.
+    pub fn into_chars(self) -> Vec<CharMapping> {
+        self.chars
+    }
+
+    /// Prepend `count` decorative `CharMapping` entries to this line and
+    /// shift all existing entries' `render_offset` up by `count`. Used by
+    /// the renderer when a per-line prefix (blockquote bar, etc.) is added
+    /// AFTER content has been pushed — keeps position_map's per-line
+    /// grapheme indices aligned with the actual rendered cell columns.
+    pub fn prepend_decoratives(
+        &mut self,
+        count: usize,
+        kind: DecorativeKind,
+        source_kind: SourceKind,
+    ) {
+        if count == 0 {
+            return;
+        }
+        for ch in self.chars.iter_mut() {
+            ch.render_offset += count;
+        }
+        let mut new_chars: Vec<CharMapping> = (0..count)
+            .map(|i| CharMapping {
+                render_offset: i,
+                formatting: Vec::new(),
+                source: None,
+                source_kind,
+                decorative: Some(kind),
+            })
+            .collect();
+        new_chars.append(&mut self.chars);
+        self.chars = new_chars;
     }
 }
 
@@ -202,6 +303,27 @@ impl PositionMap {
     /// Get mutable position map for a specific line.
     pub fn line_mut(&mut self, line_idx: usize) -> Option<&mut LinePosMap> {
         self.lines.get_mut(line_idx)
+    }
+
+    /// Pop the last line from the map (used to trim trailing empties at
+    /// end of render so `line_count()` mirrors `text.lines.len()`).
+    pub fn pop_last_line(&mut self) -> Option<LinePosMap> {
+        self.lines.pop()
+    }
+
+    /// Replace the current (last) line with the given lines.
+    ///
+    /// Used by the wrap path: a single logical line that got wrapped into
+    /// K visual lines needs its position_map representation re-shaped to
+    /// match — same K, each with its own per-line `render_offset` indexing
+    /// starting at 0.
+    ///
+    /// If the map is empty (no current line), this acts as a plain extend.
+    pub fn replace_current_with(&mut self, new_lines: Vec<LinePosMap>) {
+        if !self.lines.is_empty() {
+            self.lines.pop();
+        }
+        self.lines.extend(new_lines);
     }
 
     /// Get the formatting at a specific (line, char) position.

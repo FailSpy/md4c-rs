@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "cadenza-anchor",
     "md4c-rs",
     "ratatui-md",
 ]
@@ -13,6 +14,7 @@ rust-version = "1.70"
 
 [workspace.dependencies]
 md4c-rs = { path = "md4c-rs", version = "0.5.2" }
+cadenza-anchor = { path = "cadenza-anchor", version = "0.1.0" }
 
 # External
 ratatui = "0.29"

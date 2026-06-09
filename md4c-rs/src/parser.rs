@@ -144,6 +144,37 @@ impl ParserFlags {
     }
 }
 
+/// Per-text-callback context: extension point for offsets, span depth,
+/// future MD4C-callback enrichment without breaking the `ParserHandler::text`
+/// signature again. `#[non_exhaustive]` so new fields don't break callers.
+#[derive(Debug, Clone, Copy, Default)]
+#[non_exhaustive]
+pub struct TextContext {
+    /// Byte offset of this text run inside the original input passed to
+    /// [`parse`]. `Some` when MD4C's text pointer lies within the input
+    /// buffer — the common case for `TextType::Normal`, `TextType::Entity`
+    /// (MD4C delivers entity *source* like `&amp;`, not the decoded glyph),
+    /// `TextType::Code`, `TextType::Html`, and `TextType::LatexMath`.
+    ///
+    /// `None` when MD4C delivered text from a scratch buffer outside the
+    /// input — observed for NUL-character replacement (U+FFFD), some
+    /// whitespace-collapsing paths, and synthesized line-break text. The
+    /// safety invariant is one-directional: if `source_offset == Some(o)`,
+    /// then `input[o..o + text.len()] == text` (byte-exact); if `None`,
+    /// downstream consumers must recover the source span by other means
+    /// (e.g., a delimiter-walk from the surrounding text-leaf offsets).
+    pub source_offset: Option<u32>,
+}
+
+impl TextContext {
+    /// Builder for tests and callers that synthesize TextContext directly.
+    pub fn with_source_offset(offset: Option<u32>) -> Self {
+        Self {
+            source_offset: offset,
+        }
+    }
+}
+
 /// Events emitted during parsing
 #[derive(Debug, Clone)]
 #[non_exhaustive]
@@ -156,8 +187,8 @@ pub enum Event {
     EnterSpan(Span),
     /// Leaving an inline span
     LeaveSpan(SpanType),
-    /// Text content
-    Text(TextType, String),
+    /// Text content with per-callback context.
+    Text(TextType, String, TextContext),
 }
 
 /// Result type for parser operations
@@ -210,9 +241,18 @@ pub trait ParserHandler {
         true
     }
 
-    /// Called with text content
-    fn text(&mut self, text_type: TextType, text: &str) -> bool {
-        let _ = (text_type, text);
+    /// Called with text content.
+    ///
+    /// `ctx.source_offset` is `Some(offset)` when MD4C's text pointer lies
+    /// within the original input buffer passed to [`parse`] — the common
+    /// case for `TextType::Normal` and most others. It is `None` for
+    /// `TextType::Entity` (decoded `&amp;` → `&`) and any case where MD4C
+    /// delivered text from a scratch buffer (whitespace normalization,
+    /// soft-break collapsing). Consumers that need source spans for those
+    /// runs must use the surrounding text-leaf offsets to constrain a
+    /// delimiter-walk over the input.
+    fn text(&mut self, text_type: TextType, text: &str, ctx: TextContext) -> bool {
+        let _ = (text_type, text, ctx);
         true
     }
 }
@@ -226,6 +266,18 @@ pub fn parse<H: ParserHandler>(
     struct Context<'a, H: ParserHandler> {
         handler: &'a mut H,
         error: Option<i32>,
+        /// Start address of the input slice in the host address space.
+        /// Captured via `as_ptr() as usize` so the rest of the code is
+        /// pure-`usize` arithmetic (no provenance-bearing `*const`
+        /// subtraction across allocations).
+        input_start: usize,
+        /// End address; precomputed once via checked_add so the per-callback
+        /// path doesn't risk overflow on pathological lengths.
+        input_end: usize,
+        /// The input string — kept around so `text_cb` can validate UTF-8
+        /// char-boundary alignment via `str::is_char_boundary` before
+        /// producing an offset.
+        input_str: &'a str,
     }
 
     unsafe extern "C" fn enter_block_cb<H: ParserHandler>(
@@ -298,7 +350,45 @@ pub fn parse<H: ParserHandler>(
         let tt = TextType::from_raw(text_type).unwrap_or(TextType::Normal);
         let slice = std::slice::from_raw_parts(text as *const u8, size as usize);
         let text_str = std::str::from_utf8_unchecked(slice);
-        if ctx.handler.text(tt, text_str) {
+
+        // Compute source_offset via pure `usize` arithmetic with bounds
+        // checks BOTH ways before any subtraction. This avoids the UB of
+        // `offset_from` across unrelated allocations (entity-decoded text
+        // points into MD4C's scratch buffer, not the input buffer).
+        // Additionally validate UTF-8 char-boundary alignment so a misaligned
+        // offset doesn't poison downstream slicing.
+        let text_addr = text as usize;
+        let text_end = match text_addr.checked_add(size as usize) {
+            Some(e) => e,
+            None => {
+                // Pathological: size overflows usize. Conservative: no offset.
+                let tcx = TextContext {
+                    source_offset: None,
+                };
+                return if ctx.handler.text(tt, text_str, tcx) {
+                    0
+                } else {
+                    ctx.error = Some(1);
+                    1
+                };
+            }
+        };
+
+        let source_offset = if text_addr >= ctx.input_start && text_end <= ctx.input_end {
+            let rel = text_addr - ctx.input_start;
+            if rel <= u32::MAX as usize && ctx.input_str.is_char_boundary(rel) {
+                Some(rel as u32)
+            } else {
+                None
+            }
+        } else {
+            // Pointer lies outside the input buffer — MD4C delivered text
+            // from a scratch buffer (entity decode, normalization).
+            None
+        };
+
+        let tcx = TextContext { source_offset };
+        if ctx.handler.text(tt, text_str, tcx) {
             0
         } else {
             ctx.error = Some(1);
@@ -318,9 +408,17 @@ pub fn parse<H: ParserHandler>(
         syntax: None,
     };
 
+    let input_start = input.as_ptr() as usize;
+    let input_end = match input_start.checked_add(input.len()) {
+        Some(end) => end,
+        None => return Err(ParseError::RuntimeError),
+    };
     let mut ctx = Context {
         handler,
         error: None,
+        input_start,
+        input_end,
+        input_str: input,
     };
 
     let result = unsafe {
@@ -372,8 +470,9 @@ pub fn parse_to_events(input: &str, flags: ParserFlags) -> ParseResult<Vec<Event
             true
         }
 
-        fn text(&mut self, text_type: TextType, text: &str) -> bool {
-            self.events.push(Event::Text(text_type, text.to_owned()));
+        fn text(&mut self, text_type: TextType, text: &str, ctx: TextContext) -> bool {
+            self.events
+                .push(Event::Text(text_type, text.to_owned(), ctx));
             true
         }
     }

@@ -15,6 +15,7 @@ readme = "README.md"
 
 [dependencies]
 md4c-rs = { workspace = true }
+cadenza-anchor = { workspace = true }
 ratatui = { workspace = true }
 unicode-width = { workspace = true }
 unicode-segmentation = { workspace = true }

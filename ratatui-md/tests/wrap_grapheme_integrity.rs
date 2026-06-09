@@ -236,7 +236,7 @@ fn cjk_ideographs_wrap_between_characters() {
         .graphemes(true)
         .filter(|g| {
             g.chars().any(|c| {
-            let cp = c as u32;
+                let cp = c as u32;
                 (0x4E00..=0x9FFF).contains(&cp) || (0x3040..=0x30FF).contains(&cp)
             })
         })
@@ -245,7 +245,7 @@ fn cjk_ideographs_wrap_between_characters() {
         .graphemes(true)
         .filter(|g| {
             g.chars().any(|c| {
-            let cp = c as u32;
+                let cp = c as u32;
                 (0x4E00..=0x9FFF).contains(&cp) || (0x3040..=0x30FF).contains(&cp)
             })
         })

@@ -617,14 +617,14 @@ fn wrap_clusters(
 
     // Flush the in-progress (text, style) accumulator into cur_spans.
     let flush_text = |cur_spans: &mut Vec<RSpan<'static>>,
-         current_text: &mut String,
-         current_style: &mut Option<Style>| {
-            if !current_text.is_empty() {
-                let style = current_style.unwrap_or_default();
-                cur_spans.push(RSpan::styled(std::mem::take(current_text), style));
-                *current_style = None;
-            }
-        };
+                      current_text: &mut String,
+                      current_style: &mut Option<Style>| {
+        if !current_text.is_empty() {
+            let style = current_style.unwrap_or_default();
+            cur_spans.push(RSpan::styled(std::mem::take(current_text), style));
+            *current_style = None;
+        }
+    };
 
     // Emit (close) the current visual line. Resets line-builder state.
     // Pushes synthetic indent decoratives if this is a continuation line.
@@ -648,26 +648,26 @@ fn wrap_clusters(
     // Start a continuation line: insert hanging-indent cells (decorative).
     let start_continuation_indent =
         |cur_spans: &mut Vec<RSpan<'static>>,
-                                     cur_pos_map: &mut LinePosMap,
-                                     cur_width: &mut usize,
-                                     cur_render_offset: &mut usize| {
-        if cont_indent_cells == 0 {
-            return;
-        }
-        let indent_text: String = " ".repeat(cont_indent_cells);
-        cur_spans.push(RSpan::raw(indent_text));
-        for _ in 0..cont_indent_cells {
-            cur_pos_map.push(CharMapping {
-                render_offset: *cur_render_offset,
-                formatting: Vec::new(),
-                source: None,
-                source_kind: cadenza_anchor::SourceKind::PlainText,
-                decorative: Some(cadenza_anchor::DecorativeKind::HardWrapIndent),
-            });
-            *cur_render_offset += 1;
-        }
-        *cur_width += cont_indent_cells;
-    };
+         cur_pos_map: &mut LinePosMap,
+         cur_width: &mut usize,
+         cur_render_offset: &mut usize| {
+            if cont_indent_cells == 0 {
+                return;
+            }
+            let indent_text: String = " ".repeat(cont_indent_cells);
+            cur_spans.push(RSpan::raw(indent_text));
+            for _ in 0..cont_indent_cells {
+                cur_pos_map.push(CharMapping {
+                    render_offset: *cur_render_offset,
+                    formatting: Vec::new(),
+                    source: None,
+                    source_kind: cadenza_anchor::SourceKind::PlainText,
+                    decorative: Some(cadenza_anchor::DecorativeKind::HardWrapIndent),
+                });
+                *cur_render_offset += 1;
+            }
+            *cur_width += cont_indent_cells;
+        };
 
     // Append one input cluster to the current visual line: extends the
     // text accumulator with the matching style, pushes a CharMapping
